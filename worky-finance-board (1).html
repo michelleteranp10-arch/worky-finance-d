@@ -1,0 +1,1329 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Worky · Tablero Financiero RevOps</title>
+<style>
+  html,body{margin:0;padding:0;background:#183B59;}
+  #loading{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;color:#07B2D9;font-family:'Inter','Segoe UI',sans-serif;font-size:14px;}
+</style>
+</head>
+<body>
+<div id="root"><div id="loading">Cargando tablero…</div></div>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script>
+window.addEventListener('error', function(e){
+  var r=document.getElementById('root');
+  if(r){ r.innerHTML='<div style="color:#E8445A;font-family:sans-serif;padding:24px;font-size:13px;white-space:pre-wrap;line-height:1.5">⚠ Error:\n\n'+((e&&e.message)||e)+'</div>'; }
+});
+setTimeout(function(){
+  if(typeof React==='undefined'){
+    var r=document.getElementById('root');
+    if(r){ r.innerHTML='<div style="color:#F5A623;font-family:sans-serif;padding:24px;font-size:13px;line-height:1.5">No se cargó React (necesita internet al abrir). Revisa tu conexión y reabre el archivo.</div>'; }
+  }
+}, 5000);
+</script>
+<script>
+try {
+
+const { useState, useRef, useEffect } = React;
+function mockAI(prompt){
+  if(/PLAN DE RETENCIÓN/i.test(prompt)){
+    return ["Riesgo ALTO — causa raíz: caída sostenida de adopción + señales de contracción de plantilla.","",
+      "Lectura de señales","| Señal | Lectura | Acción |","| Uso a la baja | Menor dependencia del producto | Re-onboarding con el champion |","| Plantilla en descenso | Menos asientos = menor MRR | Revisar y ajustar el plan |","| Inactividad de login | Riesgo de abandono | Reactivar con caso de uso de nómina |","",
+      'CHART_JSON{"type":"pie","title":"Drivers del riesgo (peso %)","labels":["Caída de uso","Reducción de plantilla","Inactividad","Tickets"],"values":[45,25,20,10]}',"",
+      "Pasos a seguir","1. Llamada del KAM con el champion esta semana.","2. Sesión de capacitación al equipo en 7 días (responsable: CS).","3. Propuesta de ajuste de plan a 30 días si bajó la plantilla (responsable: KAM).","4. Activar alerta de Health Score < 45.","",
+      "Trigger de escalamiento: si en 14 días el uso no se recupera, subir al Head of CS."].join("\n");
+  }
+  if(/Contexto del deal/i.test(prompt)){
+    return ["El deal está estancado porque falta confirmar presupuesto y no hay una segunda reunión agendada; la señal más fuerte es la inactividad reciente.","",
+      "Sugerencias rápidas","- Reenviar la propuesta con un resumen ejecutivo de 3 bullets de ROI.","- Proponer 2 horarios concretos para la siguiente llamada.","- Involucrar al champion para validar el caso ante el decisor."].join("\n");
+  }
+  return ["Veredicto: vamos en línea con el objetivo, pero el churn limita el crecimiento neto.","",
+    "- El new MRR y el upsell sostienen el crecimiento mes a mes.","- El churn se come una parte importante del MRR ganado.","- El Quick Ratio por debajo de 4 indica que el motor pierde eficiencia.","- La palanca de mayor impacto es la retención, no la adquisición.","",
+    "| Palanca | Impacto | Acción |","| New MRR | Alto | Mantener ritmo de adquisición |","| Upsell | Medio | Empujar expansión en cuentas sanas |","| Churn | Crítico | Plan de retención en SMB |","",
+    'CHART_JSON{"type":"pie","title":"Prioridad de palancas (peso %)","labels":["Frenar churn","Expansión","Adquisición"],"values":[50,32,18]}',"",
+    "1. Lanzar playbook de retención enfocado en SMB el próximo trimestre.","2. Definir alertas tempranas de churn por caída de uso."].join("\n");
+}
+const _origFetch = window.fetch ? window.fetch.bind(window) : null;
+window.fetch = async (url, opts) => {
+  try {
+    if (typeof url === "string" && url.indexOf("api.anthropic.com") !== -1) {
+      const body = JSON.parse(opts.body);
+      const prompt = (body.messages && body.messages[0] && body.messages[0].content) || "";
+      await new Promise(r => setTimeout(r, 600));
+      return { json: async () => ({ content: [{ type: "text", text: mockAI(prompt) }] }) };
+    }
+  } catch (e) {}
+  return _origFetch ? _origFetch(url, opts) : Promise.reject(new Error("sin red"));
+};
+
+"use strict";
+// ════════════════════════════════════════════════════════════════════════════
+// WORKY · TABLERO FINANCIERO REVOPS (CFO-grade) — v3
+// ════════════════════════════════════════════════════════════════════════════
+const C = {
+    navy: "#183B59", navyMid: "#1C4266", navyLt: "#254F79",
+    teal: "#07B2D9", tealDim: "#0A8CBF", sand: "#DFEDF2", sandDim: "#B0CCDB",
+    red: "#E8445A", amber: "#F5A623", green: "#27C07A", purple: "#D282F5",
+    blue: "#3B7DD8", white: "#FFFFFF", muted: "#6B93AD",
+};
+const MODULES = ["Nómina", "Asistencia", "Organigrama", "Vacaciones", "Reclutamiento", "Evaluación", "Portal Empleado", "Gastos", "Contratos", "Reportes IMSS"];
+const KAMS = ["Luis Herrera", "Karla Mendoza", "Diego Ramírez", "Paola Vega"];
+const REPS = ["Ana Martínez", "Sofía Ruiz", "Valeria Torres", "Daniela López", "Fernanda Gómez"];
+const MONTHS = ["Ene", "Feb", "Mar", "Abr", "May", "Jun"];
+const MONTHS12 = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+const INDUSTRIES = ["Manufactura", "Servicios", "Retail", "Tecnología", "Salud", "Construcción", "Logística"];
+const SIZES = ["SMB (0–200)", "Mid-market (200–500)", "Enterprise (500+)"];
+function monthsAgoLabel(n) { let mi = 5 - n, y = 2026; while (mi < 0) {
+    mi += 12;
+    y--;
+} return `${MONTHS12[mi]} ${y}`; }
+const rnd = (a, b) => Math.floor(Math.random() * (b - a + 1)) + a;
+const pick = a => a[Math.floor(Math.random() * a.length)];
+const sum = a => a.reduce((s, x) => s + x, 0);
+function money(v) { const n = Math.abs(v); if (n >= 1000000)
+    return `$${(v / 1000000).toFixed(2)}M`; if (n >= 1000)
+    return `$${(v / 1000).toFixed(0)}K`; return `$${Math.round(v)}`; }
+const pct = (n, d) => d ? (n / d * 100) : 0;
+function attainColor(a) { return a >= 80 ? C.green : a >= 20 ? C.amber : C.red; }
+function hexToRgb(h) { const n = parseInt(h.slice(1), 16); return [n >> 16 & 255, n >> 8 & 255, n & 255]; }
+function rgbToHex(r) { return "#" + r.map(x => Math.round(Math.max(0, Math.min(255, x))).toString(16).padStart(2, "0")).join(""); }
+function lerp(a, b, t) { return a.map((x, i) => x + (b[i] - x) * t); }
+function heatColor(v) { const red = hexToRgb("#C0394B"), mid = hexToRgb("#E7EEF2"), grn = hexToRgb("#157A5B"); if (v >= 100) {
+    const t = Math.min(1, (v - 100) / 40);
+    return rgbToHex(lerp(mid, grn, t));
+} const t = Math.min(1, (100 - v) / 30); return rgbToHex(lerp(mid, red, t)); }
+function heatText(v) { const t = v >= 100 ? (v - 100) / 40 : (100 - v) / 30; return t > 0.55 ? "#FFFFFF" : "#0E2B40"; }
+function delta(now, prev) { return prev ? ((now - prev) / Math.abs(prev) * 100) : 0; }
+// ════════════════════════════════════════════════════════════════════════════
+// DATA
+// ════════════════════════════════════════════════════════════════════════════
+function buildFinancials() {
+    const mrrTarget = [4350000, 4520000, 4690000, 4870000, 5050000, 5230000];
+    const mrrActual = [4300000, 4410000, 4560000, 4680000, 4760000, 4870000];
+    const mrrFYTarget = 6500000;
+    const arrActual = mrrActual.map(m => m * 12), arrTarget = mrrTarget.map(m => m * 12);
+    const mrrMov = MONTHS.map((m, i) => {
+        const nuevo = [295000, 278000, 322000, 348000, 331000, 372000][i];
+        const upsell = [142000, 168000, 151000, 189000, 176000, 205000][i];
+        const react = [18000, 12000, 24000, 16000, 21000, 19000][i];
+        const contraccion = [-54000, -61000, -48000, -72000, -66000, -69000][i];
+        const churn = [-228000, -251000, -214000, -289000, -242000, -271000][i];
+        return { month: m, nuevo, upsell, react, contraccion, churn, neto: nuevo + upsell + react + contraccion + churn };
+    });
+    const upsellYTD = sum(mrrMov.map(x => x.upsell));
+    const downsellYTD = Math.abs(sum(mrrMov.map(x => x.contraccion)));
+    const churnMrrYTD = Math.abs(sum(mrrMov.map(x => x.churn)));
+    const newYTD = sum(mrrMov.map(x => x.nuevo));
+    const upsellTargetFY = 1050000;
+    const newMrrTargetYTD = 2050000;
+    // clientes churned por mes (drill-down al tocar el churn)
+    const churnPool = ["Comercial Pyme MX", "Servicios Tijuana", "Despacho Sur", "Textil Bajío", "Distribuidora Local", "Taller Norte", "Clínica Centro", "Restaurante Group", "Inmobiliaria Sur", "Logística Mini", "Abarrotes León", "Óptica Capital"];
+    const churnedByMonth = mrrMov.map((mv, i) => {
+        const target = Math.abs(mv.churn);
+        let acc = 0, k = 0;
+        const used = new Set();
+        const list = [];
+        while (acc < target * 0.92 && k < 9) {
+            let nm = pick(churnPool);
+            while (used.has(nm) && used.size < churnPool.length)
+                nm = pick(churnPool);
+            used.add(nm);
+            const mrr = rnd(9000, 52000);
+            list.push({ name: nm, mrr, reason: pick(["NPS bajo", "Uso <30%", "Migró a competidor", "Recorte de plantilla", "Precio"]) });
+            acc += mrr;
+            k++;
+        }
+        return list.sort((a, b) => b.mrr - a.mrr);
+    });
+    // detalle de cuentas por tipo de movimiento (drill-down al tocar cualquier segmento)
+    const newPool = ["Grupo Reynosa", "Servicios Mérida", "Manufacturas Puebla", "Corporativo León", "Retail Cancún", "Logística Saltillo", "Tech Mérida", "Distribuidora Oaxaca", "Salud Morelia", "Alimentos Hermosillo", "Constructora Chihuahua", "Grupo Mexicali"];
+    const upPool = ["Grupo Metropolitano", "Comercial Alpha", "Corporativo Capital", "Industrias Delta", "Grupo Premium", "Corporativo Jalisco", "Grupo Nacional", "Servicios Monterrey", "Grupo Automotriz GTO"];
+    const downPool = ["Distribuidora Central", "Manufacturas Beta", "Comercializadora Express", "Grupo Sureste", "Logística Occidente", "Retail Capital"];
+    const reactPool = ["Despacho Vega", "Óptica Roma", "Café Anáhuac", "Muebles Centro"];
+    const downReasons = ["Bajó de plan", "Quitó módulos", "Menos usuarios activos", "Renegoció precio"];
+    const churnReasons = ["NPS bajo", "Uso <30%", "Migró a competidor", "Recorte de plantilla", "Precio"];
+    const buildList = (total, pool, mn, mx, reasons) => {
+        const k = rnd(mn, mx), parts = Array.from({ length: k }, () => 0.5 + Math.random()), tot = sum(parts), p = [...pool].sort(() => Math.random() - 0.5);
+        return parts.map((pp, idx) => (Object.assign({ name: p[idx % p.length], mrr: Math.round(Math.abs(total) * pp / tot) }, (reasons ? { reason: pick(reasons) } : {})))).sort((a, b) => b.mrr - a.mrr);
+    };
+    const movDetail = mrrMov.map(m => ({
+        nuevo: buildList(m.nuevo, newPool, 3, 5),
+        upsell: buildList(m.upsell, upPool, 3, 5),
+        react: buildList(m.react, reactPool, 1, 2),
+        contraccion: buildList(m.contraccion, downPool, 2, 4, downReasons),
+        churn: buildList(m.churn, churnPool, 4, 6, churnReasons),
+    }));
+    // proyección 12 meses (real Ene–Jun + proyectado Jul–Dic) para MRR y upsell
+    const mrrFull = [...mrrActual, 4990000, 5110000, 5240000, 5360000, 5470000, 5600000];
+    const mrrTargetFull = [...mrrTarget, 5410000, 5560000, 5720000, 5900000, 6150000, 6500000];
+    const upsellM = mrrMov.map(x => x.upsell);
+    const upsellFull = [...upsellM, 198000, 212000, 205000, 224000, 219000, 238000];
+    const upsellTargetFull = [160000, 165000, 170000, 175000, 180000, 185000, 190000, 196000, 202000, 208000, 214000, 220000];
+    // breakdowns
+    const upsellByModule = MODULES.map((m, i) => ({ name: m, value: [255, 210, 55, 90, 180, 140, 70, 95, 120, 60][i] * 1000 + rnd(-15, 15) * 1000 })).sort((a, b) => b.value - a.value);
+    const downByModule = MODULES.map((m, i) => ({ name: m, value: [40, 60, 25, 38, 30, 55, 20, 42, 28, 32][i] * 1000 + rnd(-8, 8) * 1000 })).sort((a, b) => b.value - a.value);
+    const upsellByKAM = KAMS.map((k, i) => ({ name: k, value: [340, 295, 225, 171][i] * 1000 + rnd(-20, 20) * 1000 })).sort((a, b) => b.value - a.value);
+    const downByKAM = KAMS.map((k, i) => ({ name: k, value: [78, 112, 95, 85][i] * 1000 + rnd(-10, 10) * 1000 })).sort((a, b) => b.value - a.value);
+    // top cuentas
+    const bigNames = ["Grupo Industrial Azteca", "Corporativo Norteño", "Distribuidora Del Bajío", "Manufacturas Sigma", "Grupo Metropolitano", "Comercial Alpha", "Servicios Omega", "Corporativo Capital", "Grupo Sureste", "Industrias Delta", "Logística Occidente", "Grupo Premium", "Comercializadora Express", "Corporativo Jalisco", "Grupo Nacional", "Manufacturas Beta", "Distribuidora Central", "Servicios Monterrey", "Grupo Automotriz GTO", "Corporativo Salud Plus", "Alimentos del Norte", "Constructora Pacífico", "Retail Capital", "Grupo Farma MX", "Tecnología Insurgentes"];
+    const statuses = [{ s: "Activo", c: C.green }, { s: "En seguimiento", c: C.teal }, { s: "En riesgo", c: C.amber }, { s: "Crítico", c: C.red }];
+    let topCustomers = bigNames.map((n, i) => {
+        const mrr = Math.round(150000 * Math.exp(-i * 0.13) + rnd(-6000, 6000));
+        const mom = +(rnd(-180, 160) / 10).toFixed(1), qoq = +(rnd(-220, 200) / 10).toFixed(1);
+        const usageMoM = rnd(-32, 18), headcountMoM = rnd(-90, 40), lastLogin = rnd(0, 28), tickets = rnd(2, 40);
+        const usageHist = Array.from({ length: 6 }, (_, k) => Math.max(15, Math.min(100, 70 + usageMoM * 0.4 * k + rnd(-6, 6))));
+        const flags = [];
+        if (usageMoM <= -15)
+            flags.push(`Uso ${usageMoM}% MoM`);
+        if (headcountMoM <= -25)
+            flags.push(`${headcountMoM} empleados`);
+        if (lastLogin >= 14)
+            flags.push(`Sin login ${lastLogin}d`);
+        if (mom <= -8)
+            flags.push(`MRR ${mom}% MoM`);
+        let st = flags.length >= 2 ? statuses[3] : flags.length === 1 ? statuses[2] : (mom < 0 || qoq < 0) ? statuses[1] : statuses[0];
+        const tenureM = rnd(1, 54), implM = rnd(1, 3);
+        const inOnboarding = tenureM <= implM;
+        const phaseIdx = inOnboarding ? Math.min(4, Math.floor((tenureM / (implM + 0.001)) * 5)) : 5;
+        const monthsLive = inOnboarding ? 0 : tenureM - implM;
+        return { name: n, kam: pick(KAMS), mrr, mom, qoq, usageMoM, headcountMoM, lastLogin, tickets, usageHist, flags, status: st,
+            industry: pick(INDUSTRIES), mainProduct: pick(MODULES), tenureM, implM, inOnboarding, phaseIdx, monthsLive, sinceLabel: monthsAgoLabel(tenureM), isNew: tenureM <= 4 };
+    }).sort((a, b) => b.mrr - a.mrr);
+    const totalTopRev = sum(topCustomers.map(c => c.mrr));
+    let cum = 0;
+    topCustomers = topCustomers.map(c => { cum += c.mrr; return Object.assign(Object.assign({}, c), { cumPct: pct(cum, totalTopRev), inTop80: (cum - c.mrr) / totalTopRev < 0.8 }); });
+    // clientes por tipo de movimiento y por mes (drilldown al tocar cualquier segmento de la barra)
+    const newCustPool = ["Grupo Lerdo", "Corporativo Apodaca", "Servicios Celaya", "Manufactura Irapuato", "Retail Mérida", "Logística Saltillo", "Salud Cancún", "Tech Reynosa", "Alimentos Durango", "Distribuidora Mexicali", "Constructora Oaxaca", "Comercial Mazatlán"];
+    const splitInto = (total, pool) => { const k = rnd(4, 6); const parts = Array.from({ length: k }, () => 0.5 + Math.random()); const t = sum(parts); const sh = [...pool].sort(() => Math.random() - 0.5); return parts.map((p, idx) => ({ name: sh[idx % sh.length], mrr: Math.round(total * p / t) })).sort((a, b) => b.mrr - a.mrr); };
+    const movementDrill = mrrMov.map((m, i) => ({
+        nuevo: splitInto(m.nuevo, newCustPool),
+        upsell: splitInto(m.upsell, bigNames),
+        react: splitInto(m.react, bigNames),
+        contraccion: splitInto(Math.abs(m.contraccion), bigNames),
+        churn: churnedByMonth[i],
+    }));
+    // pipeline
+    const pipeByKAM = REPS.map(r => ({ name: r, fill: rnd(48, 94), deals: rnd(8, 22) }));
+    const pipeOverall = Math.round(sum(pipeByKAM.map(k => k.fill)) / pipeByKAM.length);
+    const funnel = [{ stage: "SQL", count: 46, avgDays: 9, bench: 7, amount: 1850000 }, { stage: "Demo", count: 31, avgDays: 16, bench: 12, amount: 2640000 }, { stage: "Propuesta", count: 19, avgDays: 21, bench: 14, amount: 2210000 }, { stage: "Negociación", count: 11, avgDays: 27, bench: 18, amount: 1680000 }, { stage: "Por Cerrar", count: 7, avgDays: 19, bench: 22, amount: 1120000 }];
+    const dealNames = ["Grupo Coahuila", "Servicios Bajío", "Manufactura León", "Corporativo Toluca", "Retail Yucatán", "Logística Puebla", "Constructora Sonora", "Grupo Veracruz", "Tech Querétaro", "Distribuidora Hidalgo", "Salud Guadalajara", "Alimentos Tijuana"];
+    const deals = dealNames.map(n => {
+        const emp = rnd(40, 1800), mods = rnd(1, 6), budget = Math.random() > 0.3, champion = Math.random() > 0.4;
+        const inactivity = rnd(0, 26), stage = pick(["Demo", "Propuesta", "Negociación", "Por Cerrar"]), mrr = rnd(12000, 95000);
+        const matches = (emp >= 200 ? 1 : 0) + (mods >= 3 ? 1 : 0) + (budget ? 1 : 0) + (champion ? 1 : 0);
+        const winProb = Math.min(95, 35 + matches * 14 + (stage === "Por Cerrar" ? 12 : 0));
+        const kam = pick(REPS);
+        const lastTouch = pick(["Demo enviada, sin respuesta", "Esperando aprobación de presupuesto", "Propuesta en revisión legal", "Decisor de vacaciones", "Pendiente segunda demo técnica"]);
+        return { name: n, emp, mods, budget, champion, inactivity, stage, mrr, winProb, kam, lastTouch, sureWin: winProb >= 82, stale: inactivity >= 14 };
+    }).sort((a, b) => b.winProb - a.winProb);
+    // onboarding
+    const obStages = ["Kickoff", "Configuración", "Migración de datos", "Capacitación", "Go-live"];
+    const obExpected = [3, 7, 10, 6, 4];
+    const obNames = ["Grupo Azteca", "Corporativo Norteño", "Manufacturas Sigma", "Servicios Omega", "Grupo Capital", "Industrias Delta", "Retail Capital", "Grupo Farma MX"];
+    const onboardings = obNames.map(n => { const stageIdx = rnd(0, 3); const expectedToHere = sum(obExpected.slice(0, stageIdx)) + obExpected[stageIdx] * 0.5; const paceFactor = +(0.7 + Math.random() * 0.9).toFixed(2); const elapsed = Math.round(expectedToHere * paceFactor); const projectedTotal = Math.round(sum(obExpected) * paceFactor); return { name: n, stage: obStages[stageIdx], stageIdx, elapsed, projectedTotal, benchmarkTotal: sum(obExpected), delayDays: projectedTotal - sum(obExpected), paceFactor, earlyRisk: paceFactor > 1.15, kam: pick(KAMS) }; }).sort((a, b) => b.delayDays - a.delayDays);
+    // unit economics + comparativos vs Q anterior
+    const cacMonthly = [16800, 16200, 15900, 15400, 14900, 14300];
+    const cacPaybackMonthly = [8.4, 8.1, 7.9, 7.6, 7.3, 7.0];
+    const cacAnnualPrev = 18200, cacAnnualNow = 15400;
+    const arpa = Math.round(mrrActual[5] / 172), arpaPrevQ = Math.round(mrrActual[2] / 170);
+    const custChurn = [2.4, 2.6, 2.9, 3.1, 3.4, 3.7];
+    const grossRevChurn = [6.5, 7.2, 5.8, 7.7, 6.4, 7.0];
+    const netRevChurn = [2.1, 2.6, 0.9, 2.4, 1.0, 1.4];
+    const nrrSeries = [98, 99, 101, 102, 104, 105], grrSeries = [88, 89, 90, 90, 91, 92];
+    const qr = (a, b, c, d) => +((a + b) / (c + d)).toFixed(2);
+    const q1New = sum(mrrMov.slice(0, 3).map(x => x.nuevo)), q1Up = sum(mrrMov.slice(0, 3).map(x => x.upsell)), q1Ch = Math.abs(sum(mrrMov.slice(0, 3).map(x => x.churn))), q1Co = Math.abs(sum(mrrMov.slice(0, 3).map(x => x.contraccion)));
+    const q2New = sum(mrrMov.slice(3, 6).map(x => x.nuevo)), q2Up = sum(mrrMov.slice(3, 6).map(x => x.upsell)), q2Ch = Math.abs(sum(mrrMov.slice(3, 6).map(x => x.churn))), q2Co = Math.abs(sum(mrrMov.slice(3, 6).map(x => x.contraccion)));
+    const quickRatio = qr(q2New, q2Up, q2Ch, q2Co), quickRatioPrevQ = qr(q1New, q1Up, q1Ch, q1Co);
+    const mrrGrowthYoY = 38, profitMargin = -12, ruleOf40 = mrrGrowthYoY + profitMargin, ruleOf40PrevQ = 22;
+    const bands = [
+        { band: "0–200", clients: 118, ltv: 520000, payback: 11, ltvCac: 2.4, nrr: 88, churn: 11.5, color: C.red },
+        { band: "200–500", clients: 54, ltv: 1480000, payback: 8, ltvCac: 3.6, nrr: 108, churn: 6.2, color: C.amber },
+        { band: "500+", clients: 28, ltv: 4100000, payback: 6, ltvCac: 5.1, nrr: 127, churn: 3.1, color: C.green },
+    ];
+    const smbRev = [[100, 98, 96, 94, 92, 90, 88], [100, 99, 97, 95, 93, 91, 89], [100, 98, 96, 94, 92, 90, 85], [100, 98, 97, 95, 93, 88, 85], [100, 98, 96, 94, 90, 89, 87], [100, 99, 97, 95, 92, 91, 85]];
+    const mmRev = [[100, 102, 105, 108, 112, 118, 125], [100, 103, 106, 109, 114, 120, 128], [100, 105, 110, 115, 122, 130, 138], [100, 103, 107, 110, 115, 120, 127], [100, 104, 108, 112, 116, 122, 129], [100, 103, 106, 110, 114, 120, 127]];
+    const smbLogo = [[100, 99, 98, 96, 95, 93, 91], [100, 99, 97, 96, 94, 92, 90], [100, 98, 97, 95, 93, 91, 88], [100, 99, 98, 96, 94, 90, 88], [100, 99, 97, 95, 92, 91, 89], [100, 99, 98, 96, 94, 92, 87]];
+    const mmLogo = [[100, 100, 100, 99, 99, 98, 98], [100, 100, 99, 99, 98, 98, 97], [100, 100, 100, 100, 99, 99, 98], [100, 100, 99, 99, 99, 98, 98], [100, 100, 100, 99, 99, 98, 97], [100, 100, 99, 99, 98, 98, 98]];
+    return { mrrTarget, mrrActual, mrrFYTarget, arrActual, arrTarget, mrrMov, churnedByMonth, movementDrill, mrrFull, mrrTargetFull, upsellFull, upsellTargetFull,
+        upsellYTD, upsellTargetFY, newMrrTargetYTD, downsellYTD, churnMrrYTD, newYTD, upsellByModule, downByModule, upsellByKAM, downByKAM,
+        topCustomers, totalTopRev, pipeByKAM, pipeOverall, funnel, deals, obStages, obExpected, onboardings,
+        cacMonthly, cacPaybackMonthly, cacAnnualPrev, cacAnnualNow, arpa, arpaPrevQ, custChurn, grossRevChurn, netRevChurn, nrrSeries, grrSeries,
+        quickRatio, quickRatioPrevQ, mrrGrowthYoY, profitMargin, ruleOf40, ruleOf40PrevQ, bands, smbRev, mmRev, smbLogo, mmLogo };
+}
+const FIN = buildFinancials();
+// ════════════════════════════════════════════════════════════════════════════
+// BASE
+// ════════════════════════════════════════════════════════════════════════════
+function Card({ children, style }) { return React.createElement("div", { style: Object.assign({ background: C.navyMid, border: `1px solid ${C.navyLt}`, borderRadius: 12, padding: 16 }, style) }, children); }
+function SectionTitle({ icon, children, sub }) { return React.createElement("div", { style: { marginBottom: 12 } },
+    React.createElement("div", { style: { color: C.teal, fontWeight: 800, fontSize: 12, letterSpacing: "0.06em" } },
+        icon,
+        " ",
+        children),
+    sub && React.createElement("div", { style: { color: C.muted, fontSize: 11, marginTop: 3 } }, sub)); }
+function Badge({ color, children, small }) { return React.createElement("span", { style: { background: color + "22", color, border: `1px solid ${color}44`, borderRadius: 4, padding: small ? "2px 6px" : "3px 9px", fontSize: small ? 9 : 11, fontWeight: 700, whiteSpace: "nowrap" } }, children); }
+function tabBtn(active, color) { return { background: active ? color + "22" : "transparent", color: active ? color : C.muted, border: `1px solid ${active ? color + "55" : C.navyLt}`, borderRadius: 7, padding: "6px 12px", fontWeight: 700, fontSize: 11, cursor: "pointer", whiteSpace: "nowrap" }; }
+function chip(active, color) { return { background: active ? color + "22" : C.navy, color: active ? color : C.muted, border: `1px solid ${active ? color + "66" : C.navyLt}`, borderRadius: 20, padding: "3px 11px", fontWeight: 700, fontSize: 10, cursor: "pointer" }; }
+function Kpi({ label, actual, target, invert, fmt = money, unit = "", noTarget, benchmark }) {
+    const a = pct(actual, target);
+    let col;
+    if (noTarget)
+        col = C.red;
+    else if (invert)
+        col = actual <= target ? C.green : actual <= target * 1.2 ? C.amber : C.red;
+    else
+        col = attainColor(a);
+    return React.createElement(Card, { style: { flex: 1, minWidth: 160 } },
+        React.createElement("div", { style: { color: col, fontSize: 23, fontWeight: 800, lineHeight: 1.1 } },
+            fmt(actual),
+            unit),
+        React.createElement("div", { style: { color: C.sandDim, fontSize: 11, marginTop: 6, fontWeight: 600 } }, label),
+        noTarget ? React.createElement("div", { style: { color: C.red, fontSize: 10, marginTop: 8, fontWeight: 700 } }, "\u25CF Se\u00F1al a vigilar \u2014 sin objetivo")
+            : React.createElement(React.Fragment, null,
+                React.createElement("div", { style: { position: "relative", height: 8, background: C.navyLt, borderRadius: 5, overflow: "hidden", marginTop: 8 } },
+                    React.createElement("div", { style: { width: `${Math.min(100, a)}%`, height: "100%", background: col, borderRadius: 5, transition: "width .5s" } })),
+                React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginTop: 4 } },
+                    React.createElement("span", { style: { color: C.muted, fontSize: 9 } },
+                        "Obj: ",
+                        fmt(target),
+                        unit),
+                    React.createElement("span", { style: { color: col, fontSize: 10, fontWeight: 800 } },
+                        a.toFixed(0),
+                        "%"))),
+        benchmark && React.createElement("div", { style: { color: C.muted, fontSize: 9, marginTop: 5 } }, benchmark));
+}
+// KPI con comparación vs periodo anterior (Unit Economics)
+function KpiCompare({ label, value, prev, fmt = v => v, unit = "", goodWhenLower, benchmark, color }) {
+    const d = delta(value, prev);
+    const improved = goodWhenLower ? value < prev : value > prev;
+    const dc = d === 0 ? C.muted : improved ? C.green : C.red;
+    return React.createElement(Card, null,
+        React.createElement("div", { style: { color: C.muted, fontSize: 10 } }, label),
+        React.createElement("div", { style: { color: color || C.teal, fontWeight: 800, fontSize: 20, marginTop: 2 } },
+            fmt(value),
+            unit),
+        React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 6, marginTop: 4 } },
+            React.createElement("span", { style: { color: dc, fontSize: 10, fontWeight: 800 } },
+                d >= 0 ? "▲" : "▼",
+                " ",
+                Math.abs(d).toFixed(1),
+                "%"),
+            React.createElement("span", { style: { color: C.muted, fontSize: 9 } },
+                "vs Q ant. (",
+                fmt(prev),
+                unit,
+                ")")),
+        benchmark && React.createElement("div", { style: { color: C.muted, fontSize: 9, marginTop: 3 } }, benchmark));
+}
+function BarList({ data, color, fmt = money, max }) { const mx = max || Math.max(...data.map(d => Math.abs(d.value))); return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 7 } }, data.map(d => React.createElement("div", { key: d.name },
+    React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 3 } },
+        React.createElement("span", { style: { color: C.sand, fontSize: 11 } }, d.name),
+        React.createElement("span", { style: { color, fontSize: 11, fontWeight: 700 } }, fmt(d.value))),
+    React.createElement("div", { style: { height: 6, background: C.navyLt, borderRadius: 3, overflow: "hidden" } },
+        React.createElement("div", { style: { width: `${pct(Math.abs(d.value), mx)}%`, height: "100%", background: color, borderRadius: 3 } }))))); }
+function Line({ vals, color, h = 46 }) { const mx = Math.max(...vals), mn = Math.min(...vals), rg = mx - mn || 1, W = 240, step = W / (vals.length - 1); const pts = vals.map((v, i) => `${i * step},${h - 6 - ((v - mn) / rg) * (h - 12)}`).join(" "); return React.createElement("svg", { width: "100%", height: h, viewBox: `0 0 ${W} ${h}`, preserveAspectRatio: "none" },
+    React.createElement("polyline", { points: pts, fill: "none", stroke: color, strokeWidth: "2.5" }),
+    vals.map((v, i) => React.createElement("circle", { key: i, cx: i * step, cy: h - 6 - ((v - mn) / rg) * (h - 12), r: i === vals.length - 1 ? 3.5 : 0, fill: color }))); }
+function InlineChart({ data }) { if (!(data === null || data === void 0 ? void 0 : data.labels) || !(data === null || data === void 0 ? void 0 : data.values))
+    return null; const max = Math.max(...data.values.map(Math.abs), 1); const cols = [C.teal, C.purple, C.amber, C.green, C.red, C.blue]; return React.createElement("div", { style: { background: C.navy, borderRadius: 8, padding: 12, margin: "8px 0", border: `1px solid ${C.navyLt}` } },
+    data.title && React.createElement("div", { style: { color: C.teal, fontWeight: 700, fontSize: 11, marginBottom: 8 } }, data.title),
+    React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6 } }, data.labels.map((l, i) => React.createElement("div", { key: i, style: { display: "flex", alignItems: "center", gap: 7 } },
+        React.createElement("div", { style: { color: C.muted, fontSize: 10, minWidth: 96, textAlign: "right", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, l),
+        React.createElement("div", { style: { flex: 1, background: C.navyLt, borderRadius: 3, height: 16, overflow: "hidden" } },
+            React.createElement("div", { style: { width: `${(Math.abs(data.values[i]) / max) * 100}%`, height: "100%", background: cols[i % cols.length], borderRadius: 3, display: "flex", alignItems: "center", paddingLeft: 5 } },
+                React.createElement("span", { style: { color: C.navy, fontSize: 9, fontWeight: 700 } },
+                    data.values[i],
+                    data.unit || ""))))))); }
+function PieChart({ data }) {
+    const items = data.labels.map((l, i) => ({ label: l, value: data.values[i] }));
+    const total = sum(items.map(d => d.value)) || 1;
+    let a = -Math.PI / 2;
+    const R = 50, cx = 58, cy = 58;
+    const cols = [C.teal, C.purple, C.amber, C.red, C.green, C.blue];
+    return React.createElement("div", { style: { background: C.navy, borderRadius: 8, padding: 12, margin: "8px 0", border: `1px solid ${C.navyLt}` } },
+        data.title && React.createElement("div", { style: { color: C.teal, fontWeight: 700, fontSize: 11, marginBottom: 8 } }, data.title),
+        React.createElement("div", { style: { display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap" } },
+            React.createElement("svg", { width: "116", height: "116", viewBox: "0 0 116 116" }, items.map((d, i) => { const ang = d.value / total * 2 * Math.PI; const x1 = cx + R * Math.cos(a), y1 = cy + R * Math.sin(a); a += ang; const x2 = cx + R * Math.cos(a), y2 = cy + R * Math.sin(a); const large = ang > Math.PI ? 1 : 0; return React.createElement("path", { key: i, d: `M${cx},${cy} L${x1.toFixed(2)},${y1.toFixed(2)} A${R},${R} 0 ${large} 1 ${x2.toFixed(2)},${y2.toFixed(2)} Z`, fill: cols[i % cols.length], stroke: C.navy, strokeWidth: "1.5" }); })),
+            React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 5 } }, items.map((d, i) => React.createElement("div", { key: i, style: { display: "flex", alignItems: "center", gap: 6 } },
+                React.createElement("div", { style: { width: 10, height: 10, borderRadius: 2, background: cols[i % cols.length] } }),
+                React.createElement("span", { style: { color: C.sandDim, fontSize: 11 } },
+                    d.label,
+                    " \u00B7 ",
+                    React.createElement("b", { style: { color: C.white } },
+                        (d.value / total * 100).toFixed(0),
+                        "%")))))));
+}
+// render texto IA: headings, bullets, pasos, tablas, CHART_JSON (bar | pie)
+function RichBlock({ text }) {
+    if (!text)
+        return null;
+    const charts = [];
+    let clean = text.replace(/CHART_JSON\s*:?\s*(\{[\s\S]*?\})/g, (_, j) => { try {
+        charts.push(JSON.parse(j));
+        return `«CHART${charts.length - 1}»`;
+    }
+    catch (_a) {
+        return "";
+    } });
+    const lines = clean.split("\n");
+    const out = [];
+    let buf = [];
+    let mode = "p";
+    const flush = () => { if (buf.length) {
+        out.push({ type: mode, lines: [...buf] });
+        buf = [];
+    } };
+    lines.forEach(raw => {
+        const l = raw.trim();
+        if (!l) {
+            flush();
+            mode = "p";
+            return;
+        }
+        const cm = l.match(/^«CHART(\d+)»$/);
+        if (cm) {
+            flush();
+            out.push({ type: "chart", idx: +cm[1] });
+            return;
+        }
+        if (l.startsWith("##") || l.startsWith("#")) {
+            flush();
+            out.push({ type: "h", text: l.replace(/^#+\s*/, "").replace(/\*\*/g, "") });
+            return;
+        }
+        if (l.startsWith("- ") || l.startsWith("• ") || l.startsWith("* ")) {
+            if (mode !== "ul") {
+                flush();
+                mode = "ul";
+            }
+            buf.push(l.slice(2).replace(/\*\*/g, ""));
+            return;
+        }
+        if (/^\d+[\.\)]/.test(l)) {
+            if (mode !== "ol") {
+                flush();
+                mode = "ol";
+            }
+            buf.push(l.replace(/^\d+[\.\)]\s*/, "").replace(/\*\*/g, ""));
+            return;
+        }
+        if (l.startsWith("|")) {
+            if (mode !== "tbl") {
+                flush();
+                mode = "tbl";
+            }
+            buf.push(l);
+            return;
+        }
+        if (mode !== "p") {
+            flush();
+            mode = "p";
+        }
+        buf.push(l.replace(/\*\*/g, ""));
+    });
+    flush();
+    return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6 } }, out.map((b, i) => {
+        if (b.type === "chart") {
+            const c = charts[b.idx];
+            return (c === null || c === void 0 ? void 0 : c.type) === "pie" ? React.createElement(PieChart, { key: i, data: c }) : React.createElement(InlineChart, { key: i, data: c });
+        }
+        if (b.type === "h")
+            return React.createElement("div", { key: i, style: { color: C.teal, fontWeight: 800, fontSize: 12, marginTop: i ? 8 : 0 } }, b.text);
+        if (b.type === "ul")
+            return React.createElement("div", { key: i, style: { display: "flex", flexDirection: "column", gap: 3 } }, b.lines.map((l, j) => React.createElement("div", { key: j, style: { display: "flex", gap: 7, color: C.sandDim, fontSize: 12, lineHeight: 1.6 } },
+                React.createElement("span", { style: { color: C.teal, flexShrink: 0 } }, "\u203A"),
+                React.createElement("span", null, l))));
+        if (b.type === "ol")
+            return React.createElement("div", { key: i, style: { display: "flex", flexDirection: "column", gap: 4 } }, b.lines.map((l, j) => React.createElement("div", { key: j, style: { display: "flex", gap: 8, color: C.sandDim, fontSize: 12, lineHeight: 1.6 } },
+                React.createElement("span", { style: { background: C.purple + "22", color: C.purple, minWidth: 18, height: 18, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 10, flexShrink: 0 } }, j + 1),
+                React.createElement("span", null, l))));
+        if (b.type === "tbl") {
+            const rows = b.lines.filter(r => !r.match(/^[\|\s\-:]+$/));
+            if (rows.length < 1)
+                return null;
+            const cells = r => r.split("|").map(c => c.trim()).filter((c, k, a) => !(k === 0 && c === "") && !(k === a.length - 1 && c === ""));
+            const hdrs = cells(rows[0]);
+            const data = rows.slice(1).map(cells);
+            return React.createElement("div", { key: i, style: { overflowX: "auto", margin: "4px 0" } },
+                React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 11 } },
+                    React.createElement("thead", null,
+                        React.createElement("tr", { style: { background: C.navyLt } }, hdrs.map((h, j) => React.createElement("th", { key: j, style: { padding: "5px 9px", textAlign: "left", color: C.teal, fontWeight: 700, fontSize: 10, whiteSpace: "nowrap" } }, h)))),
+                    React.createElement("tbody", null, data.map((row, j) => React.createElement("tr", { key: j, style: { background: j % 2 ? C.navy : "transparent" } }, row.map((cell, k) => React.createElement("td", { key: k, style: { padding: "5px 9px", color: C.sandDim, fontSize: 11 } }, cell)))))));
+        }
+        return React.createElement("div", { key: i, style: { color: C.sandDim, fontSize: 12, lineHeight: 1.7 } }, b.lines.join(" "));
+    }));
+}
+function slackify(t) { return t.replace(/CHART_JSON\s*:?\s*\{[\s\S]*?\}/g, "").replace(/^#+\s*/gm, "*").replace(/\*\*/g, "*").replace(/\|/g, " | ").trim(); }
+function AIInsight({ label, prompt, accent = C.purple, channel = "#revops" }) {
+    const [out, setOut] = useState(null), [loading, setLoading] = useState(false), [copied, setCopied] = useState(false);
+    async function run() { var _a, _b; setLoading(true); setOut(null); setCopied(false); try {
+        const res = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1100, messages: [{ role: "user", content: prompt }] }) });
+        const data = await res.json();
+        setOut(((_b = (_a = data.content) === null || _a === void 0 ? void 0 : _a.find(b => b.type === "text")) === null || _b === void 0 ? void 0 : _b.text) || "Sin respuesta.");
+    }
+    catch (_c) {
+        setOut("No se pudo conectar a la API.");
+    } setLoading(false); }
+    async function copySlack() { try {
+        await navigator.clipboard.writeText(`📊 *RevOps · ${channel}*\n\n` + slackify(out));
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2500);
+    }
+    catch (_a) {
+        setCopied(false);
+    } }
+    return React.createElement("div", { style: { marginTop: 12 } },
+        React.createElement("button", { onClick: run, disabled: loading, style: { background: accent + "22", color: accent, border: `1px solid ${accent}44`, borderRadius: 8, padding: "8px 14px", fontWeight: 700, fontSize: 11, cursor: "pointer" } }, loading ? "⚡ Analizando…" : `✨ ${label}`),
+        out && React.createElement("div", { style: { marginTop: 10, background: C.navy, border: `1px solid ${accent}44`, borderRadius: 10, padding: 14 } },
+            React.createElement(RichBlock, { text: out }),
+            React.createElement("div", { style: { display: "flex", justifyContent: "flex-end", marginTop: 10, gap: 8, alignItems: "center" } },
+                copied && React.createElement("span", { style: { color: C.green, fontSize: 11 } },
+                    "\u2705 Copiado para ",
+                    channel),
+                React.createElement("button", { onClick: copySlack, style: { background: "#4A154B22", color: "#E8A0C0", border: "1px solid #4A154B66", borderRadius: 6, padding: "5px 12px", fontSize: 11, fontWeight: 700, cursor: "pointer" } }, "\uD83D\uDCAC Copiar para Slack"))));
+}
+// ════════════════════════════════════════════════════════════════════════════
+// MOVIMIENTOS DE MRR — compacta e interactiva (hover, drill churn, métricas, real vs proyectado)
+// ════════════════════════════════════════════════════════════════════════════
+function MrrMovementChart() {
+    const mov = FIN.mrrMov;
+    const [view, setView] = useState("mov"); // mov | mrr | upsell
+    const [hidden, setHidden] = useState({});
+    const [hover, setHover] = useState(null); // {label,value,color}
+    const [drill, setDrill] = useState(null); // monthIdx (churn)
+    const segs = [{ key: "nuevo", label: "New", color: C.blue, sign: 1 }, { key: "upsell", label: "Upsell", color: C.teal, sign: 1 }, { key: "react", label: "Reactivación", color: C.green, sign: 1 }, { key: "contraccion", label: "Downgrade", color: C.amber, sign: -1 }, { key: "churn", label: "Churn", color: C.red, sign: -1 }];
+    const vis = segs.filter(s => !hidden[s.key]);
+    const W = 440, H = 170, padT = 14, padB = 20, zero = padT + (H - padT - padB) * 0.56, bw = W / mov.length;
+    const posMax = Math.max(1, ...mov.map(m => sum(vis.filter(s => s.sign > 0).map(s => m[s.key]))));
+    const negMax = Math.max(1, ...mov.map(m => -sum(vis.filter(s => s.sign < 0).map(s => m[s.key]))));
+    const upScale = (zero - padT) / posMax, dnScale = (H - padB - zero) / negMax;
+    const netPts = mov.map((m, i) => `${bw * i + bw / 2},${zero - m.neto * (m.neto >= 0 ? upScale : dnScale)}`).join(" ");
+    // vista real vs proyectado (MRR / Upsell)
+    function ProjView({ actual, target, title, color }) {
+        const all = [...actual, ...target];
+        const mx = Math.max(...all), mn = Math.min(...all) * 0.95, rg = mx - mn || 1;
+        const w = 440, h = 160, step = w / 11;
+        const xy = arr => arr.map((v, i) => [step * i, h - 14 - ((v - mn) / rg) * (h - 30)]);
+        const ap = xy(actual.slice(0, 6)), pp = xy([actual[5], ...actual.slice(6)]).map(([x, y], i) => [step * (5 + i), y]), tp = xy(target);
+        return React.createElement("div", null,
+            React.createElement("div", { style: { display: "flex", gap: 14, marginBottom: 6, flexWrap: "wrap" } },
+                React.createElement("span", { style: { color, fontSize: 10, fontWeight: 700 } }, "\u2501 Real"),
+                React.createElement("span", { style: { color, fontSize: 10, fontWeight: 700, opacity: .6 } }, "\u2504 Proyectado"),
+                React.createElement("span", { style: { color: C.muted, fontSize: 10 } }, "\u2504 Objetivo"),
+                React.createElement("span", { style: { color: C.sandDim, fontSize: 10, marginLeft: "auto" } },
+                    "Cierre Dic proyectado: ",
+                    React.createElement("b", { style: { color } }, money(actual[11])),
+                    " vs obj ",
+                    money(target[11]))),
+            React.createElement("svg", { width: "100%", height: h, viewBox: `0 0 ${w} ${h}`, preserveAspectRatio: "none", onMouseLeave: () => setHover(null) },
+                React.createElement("polyline", { points: tp.map(p => p.join(",")).join(" "), fill: "none", stroke: C.muted, strokeWidth: "1.6", strokeDasharray: "4 4" }),
+                React.createElement("polyline", { points: ap.map(p => p.join(",")).join(" "), fill: "none", stroke: color, strokeWidth: "2.6" }),
+                React.createElement("polyline", { points: pp.map(p => p.join(",")).join(" "), fill: "none", stroke: color, strokeWidth: "2.2", strokeDasharray: "5 4", opacity: "0.6" }),
+                xy(actual).map(([x, y], i) => React.createElement("circle", { key: i, cx: x, cy: y, r: "6", fill: "transparent", onMouseEnter: () => setHover({ label: `${MONTHS12[i]} · ${i < 6 ? "real" : "proy"}`, value: money(actual[i]), color }) })),
+                xy(actual).map(([x, y], i) => React.createElement("circle", { key: "d" + i, cx: x, cy: y, r: "2.5", fill: i < 6 ? color : C.navy, stroke: color, strokeWidth: "1.5" }))),
+            React.createElement("div", { style: { display: "flex", justifyContent: "space-between" } }, MONTHS12.map(m => React.createElement("span", { key: m, style: { color: C.muted, fontSize: 8 } }, m))));
+    }
+    return React.createElement(Card, null,
+        React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 } },
+            React.createElement(SectionTitle, { icon: "\uD83D\uDCCA", sub: "Pasa el mouse para el detalle \u00B7 clic en cualquier segmento para ver sus cuentas" }, "MOVIMIENTOS DE MRR POR TIPO"),
+            React.createElement("div", { style: { display: "flex", gap: 5 } },
+                React.createElement("button", { onClick: () => { setView("mov"); setDrill(null); }, style: tabBtn(view === "mov", C.teal) }, "Movimientos"),
+                React.createElement("button", { onClick: () => { setView("mrr"); setDrill(null); }, style: tabBtn(view === "mrr", C.teal) }, "MRR real/proy"),
+                React.createElement("button", { onClick: () => { setView("upsell"); setDrill(null); }, style: tabBtn(view === "upsell", C.teal) }, "Upsell real/proy"))),
+        view === "mov" && React.createElement(React.Fragment, null,
+            React.createElement("div", { style: { display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 8 } },
+                segs.map(s => React.createElement("button", { key: s.key, onClick: () => setHidden(h => (Object.assign(Object.assign({}, h), { [s.key]: !h[s.key] }))), style: Object.assign(Object.assign({}, chip(!hidden[s.key], s.color)), { display: "flex", alignItems: "center", gap: 5 }) },
+                    React.createElement("span", { style: { width: 9, height: 9, borderRadius: 2, background: hidden[s.key] ? C.muted : s.color, display: "inline-block" } }),
+                    s.label)),
+                React.createElement("span", { style: Object.assign(Object.assign({}, chip(true, C.white)), { cursor: "default", display: "flex", alignItems: "center", gap: 5 }) },
+                    React.createElement("span", { style: { width: 12, height: 2, background: C.white, display: "inline-block" } }),
+                    "Neto")),
+            React.createElement("div", { style: { height: 22, marginBottom: 2 } }, hover && React.createElement("span", { style: { background: hover.color + "22", color: hover.color, border: `1px solid ${hover.color}55`, borderRadius: 6, padding: "3px 10px", fontSize: 11, fontWeight: 700 } },
+                hover.label,
+                ": ",
+                hover.value)),
+            React.createElement("div", { style: { position: "relative" } },
+                React.createElement("svg", { width: "100%", viewBox: `0 0 ${W} ${H}`, style: { display: "block" }, onMouseLeave: () => setHover(null) },
+                    React.createElement("line", { x1: 0, x2: W, y1: zero, y2: zero, stroke: C.navyLt, strokeWidth: "1" }),
+                    mov.map((m, i) => {
+                        const x = bw * i + bw * 0.2, w = bw * 0.6;
+                        let yUp = zero, yDn = zero;
+                        return React.createElement("g", { key: i },
+                            vis.filter(s => s.sign > 0).map(s => { const h = m[s.key] * upScale; yUp -= h; return React.createElement("rect", { key: s.key, x: x, y: yUp, width: w, height: Math.max(0, h), fill: s.color, style: { cursor: "pointer" }, onMouseEnter: () => setHover({ label: `${m.month} · ${s.label}`, value: money(m[s.key]), color: s.color }), onClick: () => setDrill(d => d && d.i === i && d.key === s.key ? null : { i, key: s.key }) }); }),
+                            vis.filter(s => s.sign < 0).map(s => { const h = -m[s.key] * dnScale; const yy = yDn; yDn += h; return React.createElement("rect", { key: s.key, x: x, y: yy, width: w, height: Math.max(0, h), fill: s.color, style: { cursor: "pointer" }, onMouseEnter: () => setHover({ label: `${m.month} · ${s.label}`, value: money(m[s.key]), color: s.color }), onClick: () => setDrill(d => d && d.i === i && d.key === s.key ? null : { i, key: s.key }) }); }));
+                    }),
+                    React.createElement("polyline", { points: netPts, fill: "none", stroke: C.white, strokeWidth: "2.2" }),
+                    mov.map((m, i) => { const y = zero - m.neto * (m.neto >= 0 ? upScale : dnScale); return React.createElement("circle", { key: i, cx: bw * i + bw / 2, cy: y, r: "3", fill: C.white, style: { cursor: "pointer" }, onMouseEnter: () => setHover({ label: `${m.month} · Cambio neto`, value: money(m.neto), color: C.white }) }); })),
+                mov.map((m, i) => { const y = zero - m.neto * (m.neto >= 0 ? upScale : dnScale); return React.createElement("span", { key: i, style: { position: "absolute", left: `${(bw * i + bw / 2) / W * 100}%`, top: `${y / H * 100}%`, transform: "translate(-50%,-150%)", fontSize: 10, fontWeight: 800, color: C.white, whiteSpace: "nowrap", pointerEvents: "none" } }, money(m.neto)); })),
+            React.createElement("div", { style: { display: "flex", marginTop: 1 } }, mov.map((m, i) => React.createElement("div", { key: i, style: { flex: 1, textAlign: "center", fontSize: 10, color: drill && drill.i === i ? C.teal : C.muted, fontWeight: drill && drill.i === i ? 700 : 400 } }, m.month))),
+            drill && (() => {
+                const seg = segs.find(s => s.key === drill.key);
+                const m = mov[drill.i];
+                const list = FIN.movementDrill[drill.i][drill.key];
+                const total = Math.abs(m[drill.key]);
+                const isChurn = drill.key === "churn";
+                const pos = seg.sign > 0;
+                return React.createElement("div", { style: { marginTop: 10, background: C.navy, border: `1px solid ${seg.color}55`, borderRadius: 10, padding: 12 } },
+                    React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 } },
+                        React.createElement("span", { style: { color: seg.color, fontWeight: 800, fontSize: 12 } },
+                            seg.label,
+                            " \u00B7 ",
+                            m.month,
+                            " 2026 \u00B7 ",
+                            pos ? "+" : "−",
+                            money(total),
+                            " \u00B7 ",
+                            list.length,
+                            " cuentas"),
+                        React.createElement("button", { onClick: () => setDrill(null), style: { background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: 14 } }, "\u2715")),
+                    React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 11 } },
+                        React.createElement("thead", null,
+                            React.createElement("tr", { style: { background: C.navyLt } }, ["Cuenta", pos ? "MRR sumado" : "MRR perdido", ...(isChurn ? ["Motivo"] : [])].map(h => React.createElement("th", { key: h, style: { textAlign: h === "Cuenta" || h === "Motivo" ? "left" : "right", color: C.muted, padding: "5px 9px", fontSize: 10, fontWeight: 700 } }, h)))),
+                        React.createElement("tbody", null, list.map((c, j) => React.createElement("tr", { key: j, style: { background: j % 2 ? C.navy : "transparent" } },
+                            React.createElement("td", { style: { padding: "5px 9px", color: C.white } }, c.name),
+                            React.createElement("td", { style: { padding: "5px 9px", color: seg.color, fontWeight: 700, textAlign: "right" } },
+                                pos ? "+" : "−",
+                                money(c.mrr)),
+                            isChurn && React.createElement("td", { style: { padding: "5px 9px", color: C.sandDim } }, c.reason))))),
+                    React.createElement("div", { style: { color: C.muted, fontSize: 10, marginTop: 6 } },
+                        "Ordenado de mayor a menor MRR. ",
+                        isChurn ? "Prioriza la causa raíz por las cuentas grandes." : pos ? "Cuentas que aportaron este movimiento." : "Cuentas que redujeron su plan."));
+            })(),
+            React.createElement("div", { style: { marginTop: 8, color: C.muted, fontSize: 10 } }, "Clic en cualquier segmento de la barra para ver sus cuentas y MRR. El cambio neto (l\u00EDnea blanca) sigue positivo, pero el churn se come gran parte del new + upsell.")),
+        view === "mrr" && React.createElement(React.Fragment, null,
+            React.createElement("div", { style: { height: 22, marginBottom: 2 } }, hover && React.createElement("span", { style: { background: hover.color + "22", color: hover.color, border: `1px solid ${hover.color}55`, borderRadius: 6, padding: "3px 10px", fontSize: 11, fontWeight: 700 } },
+                hover.label,
+                ": ",
+                hover.value)),
+            React.createElement(ProjView, { actual: FIN.mrrFull, target: FIN.mrrTargetFull, color: C.teal })),
+        view === "upsell" && React.createElement(React.Fragment, null,
+            React.createElement("div", { style: { height: 22, marginBottom: 2 } }, hover && React.createElement("span", { style: { background: hover.color + "22", color: hover.color, border: `1px solid ${hover.color}55`, borderRadius: 6, padding: "3px 10px", fontSize: 11, fontWeight: 700 } },
+                hover.label,
+                ": ",
+                hover.value)),
+            React.createElement(ProjView, { actual: FIN.upsellFull, target: FIN.upsellTargetFull, color: C.purple })));
+}
+// ════════════════════════════════════════════════════════════════════════════
+// PROYECCIÓN A FIN DE MES / Q (determinística)
+// ════════════════════════════════════════════════════════════════════════════
+function ForecastPanel() {
+    const mrrNow = FIN.mrrActual[5], objMonth = FIN.mrrTarget[5], objQ = FIN.mrrFYTarget; // objetivo fin de año como referencia Q4
+    const closeable = FIN.deals.filter(d => d.winProb >= 55);
+    const closeExp = Math.round(sum(closeable.map(d => d.mrr * d.winProb / 100))), closeTotal = sum(closeable.map(d => d.mrr));
+    const upC = FIN.topCustomers.filter(c => ["Activo", "En seguimiento"].includes(c.status.s) && c.usageMoM >= 0).slice(0, 7);
+    const upExp = Math.round(sum(upC.map(c => c.mrr * 0.12)));
+    const dnC = FIN.topCustomers.filter(c => c.status.s === "En riesgo").slice(0, 6);
+    const dnExp = Math.round(sum(dnC.map(c => c.mrr * 0.15)));
+    const chC = FIN.topCustomers.filter(c => c.status.s === "Crítico");
+    const chExp = Math.round(sum(chC.map(c => c.mrr * 0.6)));
+    const projected = mrrNow + closeExp + upExp - dnExp - chExp;
+    const cats = [
+        { icon: "🎯", label: "Posible cierre", color: C.blue, n: closeable.length, mrr: closeExp, note: `${money(closeTotal)} en pipeline · ponderado por win%`, list: closeable.slice(0, 4).map(d => `${d.name} (${d.winProb}%) ${money(d.mrr)}`) },
+        { icon: "🚀", label: "Posible upsell", color: C.teal, n: upC.length, mrr: upExp, note: "cuentas sanas con expansión probable", list: upC.slice(0, 4).map(c => `${c.name} ${money(Math.round(c.mrr * 0.12))}`) },
+        { icon: "⬇️", label: "Posible downsell", color: C.amber, n: dnC.length, mrr: -dnExp, note: "cuentas en riesgo de contracción", list: dnC.slice(0, 4).map(c => `${c.name} ${money(Math.round(c.mrr * 0.15))}`) },
+        { icon: "🔴", label: "Posible churn", color: C.red, n: chC.length, mrr: -chExp, note: "cuentas críticas en riesgo de baja", list: chC.slice(0, 4).map(c => `${c.name} ${money(c.mrr)}`) },
+    ];
+    const [open, setOpen] = useState(null);
+    const [hz, setHz] = useState("mes");
+    const netMonth = projected - mrrNow;
+    const projectedQ = Math.round(mrrNow + netMonth * 3);
+    const objQv = FIN.mrrTargetFull[8]; // Sep — fin de Q3
+    const curProj = hz === "mes" ? projected : projectedQ;
+    const curObj = hz === "mes" ? objMonth : objQv;
+    const curLabel = hz === "mes" ? "fin de mes (Jun)" : "fin de Q (Sep)";
+    const attainMonth = pct(curProj, curObj);
+    return React.createElement(Card, null,
+        React.createElement(SectionTitle, { icon: "\uD83D\uDD2E", sub: "Proyecci\u00F3n ponderada: MRR actual + cierres + upsell \u2212 downsell \u2212 churn" }, "PROYECCI\u00D3N A FIN DE PERIODO"),
+        React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 10, marginBottom: 14 } }, cats.map((c, i) => (React.createElement("div", { key: c.label, onClick: () => setOpen(open === i ? null : i), style: { background: C.navy, border: `1px solid ${c.color}44`, borderRadius: 10, padding: 12, cursor: "pointer" } },
+            React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+                React.createElement("span", { style: { color: C.sandDim, fontSize: 11, fontWeight: 700 } },
+                    c.icon,
+                    " ",
+                    c.label),
+                React.createElement("span", { style: { color: C.muted, fontSize: 14 } }, open === i ? "▾" : "▸")),
+            React.createElement("div", { style: { color: c.color, fontWeight: 800, fontSize: 20, marginTop: 4 } },
+                c.mrr >= 0 ? "+" : "−",
+                money(c.mrr)),
+            React.createElement("div", { style: { color: C.white, fontSize: 11, marginTop: 2 } },
+                c.n,
+                " empresas"),
+            React.createElement("div", { style: { color: C.muted, fontSize: 9, marginTop: 3 } }, c.note),
+            open === i && React.createElement("div", { style: { marginTop: 8, display: "flex", flexDirection: "column", gap: 4, borderTop: `1px solid ${C.navyLt}`, paddingTop: 8 } }, c.list.map((t, k) => React.createElement("div", { key: k, style: { color: C.sandDim, fontSize: 10 } },
+                "\u00B7 ",
+                t))))))),
+        React.createElement("div", { style: { background: C.navy, borderRadius: 10, padding: 14, border: `1px solid ${attainColor(attainMonth)}44` } },
+            React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 8 } },
+                React.createElement("span", { style: { color: C.sandDim, fontSize: 11, fontWeight: 700 } },
+                    "Proyecci\u00F3n a ",
+                    curLabel),
+                React.createElement("div", { style: { display: "flex", gap: 5 } },
+                    React.createElement("button", { onClick: () => setHz("mes"), style: tabBtn(hz === "mes", C.teal) }, "Fin de mes"),
+                    React.createElement("button", { onClick: () => setHz("Q"), style: tabBtn(hz === "Q", C.teal) }, "Fin de Q"))),
+            React.createElement("div", { style: { display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 8 } },
+                React.createElement("div", null,
+                    React.createElement("div", { style: { color: C.muted, fontSize: 10 } }, "MRR actual"),
+                    React.createElement("div", { style: { color: C.white, fontWeight: 800, fontSize: 18 } }, money(mrrNow))),
+                React.createElement("div", null,
+                    React.createElement("div", { style: { color: C.muted, fontSize: 10 } }, "MRR proyectado"),
+                    React.createElement("div", { style: { color: attainColor(attainMonth), fontWeight: 800, fontSize: 18 } }, money(curProj))),
+                React.createElement("div", null,
+                    React.createElement("div", { style: { color: C.muted, fontSize: 10 } }, "Objetivo"),
+                    React.createElement("div", { style: { color: C.white, fontWeight: 800, fontSize: 18 } }, money(curObj))),
+                React.createElement("div", null,
+                    React.createElement("div", { style: { color: C.muted, fontSize: 10 } }, "Cumplimiento proyectado"),
+                    React.createElement("div", { style: { color: attainColor(attainMonth), fontWeight: 800, fontSize: 18 } },
+                        attainMonth.toFixed(0),
+                        "%"))),
+            React.createElement("div", { style: { position: "relative", height: 10, background: C.navyLt, borderRadius: 5, overflow: "hidden" } },
+                React.createElement("div", { style: { width: `${Math.min(100, attainMonth)}%`, height: "100%", background: attainColor(attainMonth), borderRadius: 5 } }),
+                React.createElement("div", { style: { position: "absolute", left: `${Math.min(100, pct(curObj, curProj > curObj ? curProj : curObj))}%`, top: 0, height: "100%", borderLeft: `2px dashed ${C.white}` } })),
+            React.createElement("div", { style: { color: C.muted, fontSize: 10, marginTop: 6 } }, curProj >= curObj ? `✅ Proyectamos superar el objetivo de ${curLabel} por ${money(curProj - curObj)} si se ejecuta el pipeline ponderado.` : `⚠ Faltan ${money(curObj - curProj)} para el objetivo de ${curLabel} — el gap se cierra acelerando cierres o frenando el churn crítico (${money(chExp)} en riesgo).`)));
+}
+// ════════════════════════════════════════════════════════════════════════════
+// SECCIÓN 1 — RESUMEN
+// ════════════════════════════════════════════════════════════════════════════
+function ResumenSection() {
+    const mrrNow = FIN.mrrActual[5], mrrTgt = FIN.mrrTarget[5];
+    const upsellYTD = FIN.upsellYTD, downYTD = FIN.downsellYTD, churnYTD = FIN.churnMrrYTD;
+    const [view, setView] = useState("up");
+    const bd = view === "up" ? { mod: FIN.upsellByModule, kam: FIN.upsellByKAM, color: C.teal, label: "Upsell (New MRR)" } : { mod: FIN.downByModule, kam: FIN.downByKAM, color: C.amber, label: "Downsell (Contracción)" };
+    const aiCtx = `MRR Jun ${money(mrrNow)} (obj ${money(mrrTgt)}, ${pct(mrrNow, mrrTgt).toFixed(0)}%). Upsell YTD ${money(upsellYTD)}. Downsell YTD ${money(downYTD)}. Churn MRR YTD ${money(churnYTD)}. New MRR YTD ${money(FIN.newYTD)}. Quick Ratio ${FIN.quickRatio}. SaaS nómina/RRHH México, ~10 años, no rentable.`;
+    return React.createElement("div", null,
+        React.createElement(SectionTitle, { icon: "\uD83D\uDCB0", sub: "YTD Ene\u2013Jun 2026 \u00B7 rojo <20% \u00B7 amarillo 20\u201380% \u00B7 verde \u226580%" }, "VISI\u00D3N EJECUTIVA \u2014 REVENUE 2026"),
+        React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 10, marginBottom: 16 } },
+            React.createElement(Kpi, { label: "MRR \u00B7 Jun 2026", actual: mrrNow, target: mrrTgt }),
+            React.createElement(Kpi, { label: "New MRR \u00B7 YTD", actual: FIN.newYTD, target: FIN.newMrrTargetYTD }),
+            React.createElement(Kpi, { label: "Upsell YTD", actual: upsellYTD, target: FIN.upsellTargetFY }),
+            React.createElement(Kpi, { label: "Downsell YTD", actual: downYTD, target: 0, noTarget: true })),
+        React.createElement("div", { style: { marginBottom: 16 } },
+            React.createElement(MrrMovementChart, null)),
+        React.createElement("div", { style: { marginBottom: 16 } },
+            React.createElement(ForecastPanel, null)),
+        React.createElement(Card, null,
+            React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 } },
+                React.createElement(SectionTitle, { icon: "\uD83D\uDD0D" },
+                    "DESGLOSE \u2014 ",
+                    bd.label.toUpperCase()),
+                React.createElement("div", { style: { display: "flex", gap: 6 } },
+                    React.createElement("button", { onClick: () => setView("up"), style: tabBtn(view === "up", C.teal) }, "\uD83D\uDE80 Upsell"),
+                    React.createElement("button", { onClick: () => setView("down"), style: tabBtn(view === "down", C.amber) }, "\u2B07\uFE0F Downsell"))),
+            React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))", gap: 18 } },
+                React.createElement("div", null,
+                    React.createElement("div", { style: { color: C.sandDim, fontSize: 11, fontWeight: 700, marginBottom: 8 } }, "New MRR por m\u00F3dulo"),
+                    React.createElement(BarList, { data: bd.mod, color: bd.color })),
+                React.createElement("div", null,
+                    React.createElement("div", { style: { color: C.sandDim, fontSize: 11, fontWeight: 700, marginBottom: 8 } }, "New MRR por KAM"),
+                    React.createElement(BarList, { data: bd.kam, color: bd.color }))),
+            React.createElement(AIInsight, { accent: C.purple, channel: "#revenue-review", label: "Diagn\u00F3stico IA del revenue YTD", prompt: `Eres analista de Revenue Operations para un SaaS de nómina/RRHH en México. Datos: ${aiCtx}.
+Responde en español, listo para Slack. Incluye EXACTAMENTE:
+1) Un encabezado corto con el veredicto vs objetivo.
+2) 4 viñetas con "- " explicando causas (conecta con rentabilidad).
+3) Una tabla markdown: Palanca | Impacto | Acción (New MRR, Upsell, Churn).
+4) Un gráfico de PIE con este formato exacto: CHART_JSON{"type":"pie","title":"Prioridad de palancas (peso %)","labels":["Frenar churn","Expansión","Adquisición"],"values":[50,32,18]}
+5) Cierra con 2 acciones del próximo trimestre numeradas (1. 2.).
+No uses # ni **.` })));
+}
+// ════════════════════════════════════════════════════════════════════════════
+// SECCIÓN 2 — TOP CUENTAS (igual que v2)
+// ════════════════════════════════════════════════════════════════════════════
+function TopCuentasSection() {
+    const top80 = FIN.topCustomers.filter(c => c.inTop80);
+    const flagged = FIN.topCustomers.filter(c => c.flags.length > 0);
+    const [sel, setSel] = useState(null);
+    const Delta = ({ v }) => { const up = v >= 0; return React.createElement("span", { style: { color: up ? C.green : C.red, fontWeight: 700, fontSize: 11 } },
+        up ? "▲" : "▼",
+        " ",
+        Math.abs(v),
+        "%"); };
+    function health(c) { let s = 100; if (c.usageMoM < 0)
+        s += c.usageMoM * 1.4; if (c.headcountMoM < 0)
+        s += c.headcountMoM * 0.25; s -= c.lastLogin * 1.1; s -= c.tickets * 0.6; if (c.mom < 0)
+        s += c.mom * 1.5; return Math.max(5, Math.min(100, Math.round(s))); }
+    return React.createElement("div", null,
+        React.createElement(SectionTitle, { icon: "\uD83C\uDFAF", sub: `${top80.length} cuentas = 80% del revenue · ${flagged.length} con señal de riesgo` }, "TOP CUENTAS \u2014 PARETO 80% & SALUD"),
+        React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 10, marginBottom: 14 } },
+            React.createElement(Card, null,
+                React.createElement("div", { style: { color: C.muted, fontSize: 10 } }, "Revenue Top 80%"),
+                React.createElement("div", { style: { color: C.teal, fontWeight: 800, fontSize: 20 } }, money(sum(top80.map(c => c.mrr))))),
+            React.createElement(Card, null,
+                React.createElement("div", { style: { color: C.muted, fontSize: 10 } }, "Concentraci\u00F3n"),
+                React.createElement("div", { style: { color: C.amber, fontWeight: 800, fontSize: 20 } },
+                    top80.length,
+                    " cuentas")),
+            React.createElement(Card, null,
+                React.createElement("div", { style: { color: C.muted, fontSize: 10 } }, "En riesgo / cr\u00EDtico"),
+                React.createElement("div", { style: { color: C.red, fontWeight: 800, fontSize: 20 } }, flagged.length)),
+            React.createElement(Card, null,
+                React.createElement("div", { style: { color: C.muted, fontSize: 10 } }, "MRR en riesgo"),
+                React.createElement("div", { style: { color: C.red, fontWeight: 800, fontSize: 20 } }, money(sum(flagged.map(c => c.mrr)))))),
+        React.createElement(Card, { style: { padding: 0, overflow: "hidden" } },
+            React.createElement("div", { style: { overflowX: "auto" } },
+                React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 11, minWidth: 780 } },
+                    React.createElement("thead", null,
+                        React.createElement("tr", { style: { background: C.navy } }, ["Cuenta", "KAM", "MRR", "% acum", "MoM", "QoQ", "Estatus", "Red flags"].map(h => React.createElement("th", { key: h, style: { textAlign: ["Cuenta", "KAM", "Estatus", "Red flags"].includes(h) ? "left" : "right", color: C.muted, fontWeight: 700, padding: "9px 12px", whiteSpace: "nowrap", fontSize: 10 } }, h)))),
+                    React.createElement("tbody", null, FIN.topCustomers.map((c, i) => (React.createElement("tr", { key: c.name, onClick: () => setSel(c), style: { borderTop: `1px solid ${C.navyLt}`, cursor: "pointer", background: c.flags.length >= 2 ? C.red + "11" : i % 2 ? C.navy + "55" : "transparent" } },
+                        React.createElement("td", { style: { padding: "9px 12px", color: C.white, fontWeight: 600, whiteSpace: "nowrap" } },
+                            c.inTop80 && React.createElement("span", { style: { color: C.teal } }, "\u25CF "),
+                            c.name),
+                        React.createElement("td", { style: { padding: "9px 12px", color: C.sandDim, whiteSpace: "nowrap" } }, c.kam),
+                        React.createElement("td", { style: { padding: "9px 12px", color: C.teal, fontWeight: 700, textAlign: "right", whiteSpace: "nowrap" } }, money(c.mrr)),
+                        React.createElement("td", { style: { padding: "9px 12px", color: C.muted, textAlign: "right" } },
+                            c.cumPct.toFixed(0),
+                            "%"),
+                        React.createElement("td", { style: { padding: "9px 12px", textAlign: "right" } },
+                            React.createElement(Delta, { v: c.mom })),
+                        React.createElement("td", { style: { padding: "9px 12px", textAlign: "right" } },
+                            React.createElement(Delta, { v: c.qoq })),
+                        React.createElement("td", { style: { padding: "9px 12px" } },
+                            React.createElement(Badge, { color: c.status.c, small: true }, c.status.s)),
+                        React.createElement("td", { style: { padding: "9px 12px" } }, c.flags.length ? React.createElement("div", { style: { display: "flex", gap: 4, flexWrap: "wrap" } }, c.flags.map(f => React.createElement(Badge, { key: f, color: C.red, small: true }, f))) : React.createElement("span", { style: { color: C.muted } }, "\u2014"))))))))),
+        React.createElement("div", { style: { color: C.muted, fontSize: 10, marginTop: 8 } }, "\u25CF = dentro del 80% del revenue \u00B7 fila roja = 2+ se\u00F1ales \u00B7 clic en una cuenta para el plan de retenci\u00F3n"),
+        sel && (() => {
+            const hs = health(sel);
+            const hsColor = hs >= 70 ? C.green : hs >= 45 ? C.amber : C.red;
+            const playbook = hs >= 70 ? "Expansión" : "Retención";
+            return React.createElement(Card, { style: { marginTop: 14, border: `1px solid ${sel.status.c}55` } },
+                React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 } },
+                    React.createElement("div", null,
+                        React.createElement("div", { style: { color: C.white, fontWeight: 800, fontSize: 14 } }, sel.name),
+                        React.createElement("div", { style: { color: C.muted, fontSize: 11 } },
+                            "KAM ",
+                            sel.kam,
+                            " \u00B7 MRR ",
+                            money(sel.mrr),
+                            " \u00B7 ",
+                            sel.status.s)),
+                    React.createElement("button", { onClick: () => setSel(null), style: { background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: 16 } }, "\u2715")),
+                (() => {
+                    const stages = [...FIN.obStages, "En producción"];
+                    const curIdx = sel.inOnboarding ? sel.phaseIdx : 5;
+                    return React.createElement("div", { style: { background: C.navy, borderRadius: 10, padding: 12, border: `1px solid ${C.navyLt}`, marginBottom: 8 } },
+                        React.createElement("div", { style: { display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 10 } },
+                            React.createElement("div", null,
+                                React.createElement("div", { style: { color: C.muted, fontSize: 10 } }, "Cliente desde"),
+                                React.createElement("div", { style: { color: C.white, fontWeight: 800, fontSize: 16 } },
+                                    sel.sinceLabel,
+                                    " \u00B7 ",
+                                    sel.tenureM,
+                                    " ",
+                                    sel.tenureM === 1 ? "mes" : "meses"),
+                                React.createElement("div", { style: { color: C.muted, fontSize: 10, marginTop: 2 } },
+                                    sel.industry,
+                                    " \u00B7 m\u00F3dulo principal: ",
+                                    sel.mainProduct)),
+                            React.createElement("div", { style: { display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" } },
+                                sel.isNew && React.createElement(Badge, { color: C.teal }, "\uD83C\uDD95 Cliente nuevo"),
+                                sel.inOnboarding ? React.createElement(Badge, { color: C.amber },
+                                    "\uD83D\uDEA7 En onboarding \u00B7 ",
+                                    FIN.obStages[sel.phaseIdx]) : React.createElement(Badge, { color: C.green },
+                                    "\u2705 En producci\u00F3n \u00B7 ",
+                                    sel.monthsLive,
+                                    " ",
+                                    sel.monthsLive === 1 ? "mes" : "meses",
+                                    " corriendo"))),
+                        React.createElement("div", { style: { display: "flex", gap: 3, marginBottom: 4 } }, stages.map((s, i) => React.createElement("div", { key: s, style: { flex: i === 5 ? 1.4 : 1, height: 8, borderRadius: 3, background: i < curIdx ? C.green : i === curIdx ? (sel.inOnboarding ? C.amber : C.teal) : C.navyLt } }))),
+                        React.createElement("div", { style: { display: "flex", gap: 3 } }, stages.map((s, i) => React.createElement("div", { key: s, style: { flex: i === 5 ? 1.4 : 1, fontSize: 8, textAlign: "center", color: i === curIdx ? C.white : C.muted } }, s.replace(" de datos", "")))),
+                        React.createElement("div", { style: { color: C.muted, fontSize: 10, marginTop: 8 } }, sel.inOnboarding ? "Aún implementando — la prioridad es acelerar el go-live y asegurar adopción, no upsell." : sel.monthsLive < 6 ? `Recién en producción (${sel.monthsLive} ${sel.monthsLive === 1 ? "mes" : "meses"}) — ventana crítica: el riesgo de churn es más alto los primeros 6 meses.` : "Cliente maduro y en producción — candidato sano para expansión si el Health Score acompaña."));
+                })(),
+                React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12, marginBottom: 8 } },
+                    React.createElement("div", { style: { background: C.navy, borderRadius: 10, padding: 12, border: `1px solid ${C.navyLt}` } },
+                        React.createElement("div", { style: { color: C.muted, fontSize: 10, marginBottom: 4 } }, "Health Score"),
+                        React.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 8 } },
+                            React.createElement("span", { style: { color: hsColor, fontWeight: 800, fontSize: 30 } }, hs),
+                            React.createElement("span", { style: { color: C.muted, fontSize: 11 } }, "/100")),
+                        React.createElement("div", { style: { height: 7, background: C.navyLt, borderRadius: 4, overflow: "hidden", marginTop: 6 } },
+                            React.createElement("div", { style: { width: `${hs}%`, height: "100%", background: hsColor, borderRadius: 4 } })),
+                        React.createElement("div", { style: { marginTop: 8 } },
+                            React.createElement(Badge, { color: playbook === "Expansión" ? C.green : C.red },
+                                "Playbook: ",
+                                playbook))),
+                    React.createElement("div", { style: { background: C.navy, borderRadius: 10, padding: 12, border: `1px solid ${C.navyLt}` } },
+                        React.createElement("div", { style: { color: C.muted, fontSize: 10, marginBottom: 6 } }, "Tendencia de uso (6m)"),
+                        React.createElement(Line, { vals: sel.usageHist, color: sel.usageMoM < 0 ? C.red : C.green, h: 54 }),
+                        React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginTop: 4 } },
+                            React.createElement("span", { style: { color: C.muted, fontSize: 9 } }, "hace 6m"),
+                            React.createElement("span", { style: { color: sel.usageMoM < 0 ? C.red : C.green, fontSize: 10, fontWeight: 700 } },
+                                sel.usageMoM > 0 ? "+" : "",
+                                sel.usageMoM,
+                                "% MoM"))),
+                    React.createElement("div", { style: { background: C.navy, borderRadius: 10, padding: 12, border: `1px solid ${C.navyLt}` } },
+                        React.createElement("div", { style: { color: C.muted, fontSize: 10, marginBottom: 6 } }, "Se\u00F1ales"),
+                        React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6 } },
+                            React.createElement(Badge, { color: sel.headcountMoM < 0 ? C.red : C.green, small: true },
+                                sel.headcountMoM > 0 ? "+" : "",
+                                sel.headcountMoM,
+                                " empleados MoM"),
+                            React.createElement(Badge, { color: sel.lastLogin >= 14 ? C.red : C.muted, small: true },
+                                "\u00DAltimo login ",
+                                sel.lastLogin,
+                                "d"),
+                            React.createElement(Badge, { color: sel.tickets > 20 ? C.amber : C.muted, small: true },
+                                sel.tickets,
+                                " tickets abiertos")))),
+                React.createElement(AIInsight, { accent: sel.status.c, channel: `#cuenta-${(sel.name.split(" ")[1] || "x").toLowerCase()}`, label: "Generar plan de retenci\u00F3n IA", prompt: `Eres Head of RevOps en Worky (SaaS nómina/RRHH México). Cuenta "${sel.name}" (KAM ${sel.kam}, MRR ${money(sel.mrr)}/mes, Health Score ${hs}/100). Señales: uso ${sel.usageMoM}% MoM, ${sel.headcountMoM} empleados MoM, último login ${sel.lastLogin}d, ${sel.tickets} tickets, MRR ${sel.mom}% MoM / ${sel.qoq}% QoQ.
+Genera un PLAN DE RETENCIÓN con metodología (Health Score → causa raíz → playbook), en español, listo para Slack. Incluye EXACTAMENTE:
+1) Encabezado con nivel de riesgo y causa raíz.
+2) Tabla markdown: Señal | Lectura | Acción.
+3) CHART_JSON{"type":"pie","title":"Drivers del riesgo (peso %)","labels":["Caída de uso","Reducción de plantilla","Inactividad","Tickets"],"values":[40,25,20,15]} ajustando valores a esta cuenta.
+4) Pasos numerados (1. 2. 3. 4.) con responsable y plazo.
+5) Trigger de escalamiento al Head of CS.
+No uses # ni **.` }));
+        })());
+}
+// ════════════════════════════════════════════════════════════════════════════
+// CHATBOT POR DEAL (portado del dashboard original)
+// ════════════════════════════════════════════════════════════════════════════
+function DealChat({ deal, onClose }) {
+    const [msgs, setMsgs] = useState([{ role: "ai", text: `Pregúntame lo que sea sobre ${deal.name}: por qué está estancado, qué falta para cerrar, próximo paso… También puedo redactar un follow-up.` }]);
+    const [inp, setInp] = useState("");
+    const [loading, setLoading] = useState(false);
+    const endRef = useRef(null);
+    useEffect(() => { var _a; (_a = endRef.current) === null || _a === void 0 ? void 0 : _a.scrollIntoView({ behavior: "smooth" }); }, [msgs]);
+    const ctx = `Deal "${deal.name}" | etapa ${deal.stage} | MRR potencial ${money(deal.mrr)} | ${deal.emp} empleados | ${deal.mods} módulos de interés | presupuesto ${deal.budget ? "confirmado" : "SIN confirmar"} | champion ${deal.champion ? "identificado" : "SIN identificar"} | ${deal.inactivity} días sin actividad | win probability ${deal.winProb}% | rep ${deal.kam} | última interacción: ${deal.lastTouch}`;
+    async function send(q) {
+        var _a, _b;
+        const txt = (q || inp).trim();
+        if (!txt || loading)
+            return;
+        const nm = [...msgs, { role: "user", text: txt }];
+        setMsgs(nm);
+        setInp("");
+        setLoading(true);
+        const prompt = `Eres asistente de Revenue Operations de Worky (SaaS nómina/RRHH México). Contexto del deal: ${ctx}. Pregunta del usuario: "${txt}". Responde en español, breve y accionable. Si detectas por qué está estancado, dilo directo. Si piden redactar un mensaje, hazlo listo para enviar. Si ayuda una mini tabla usa formato markdown con pipes. No uses # ni **.`;
+        try {
+            const res = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 700, messages: [{ role: "user", content: prompt }] }) });
+            const data = await res.json();
+            setMsgs([...nm, { role: "ai", text: ((_b = (_a = data.content) === null || _a === void 0 ? void 0 : _a.find(b => b.type === "text")) === null || _b === void 0 ? void 0 : _b.text) || "Error." }]);
+        }
+        catch (_c) {
+            setMsgs([...nm, { role: "ai", text: "No se pudo conectar a la API." }]);
+        }
+        setLoading(false);
+    }
+    async function slack(t) { try {
+        await navigator.clipboard.writeText(`💬 *RevOps · deal ${deal.name}*\n\n` + slackify(t));
+    }
+    catch (_a) { } }
+    const sugg = ["¿Por qué está estancado?", "¿Qué falta para cerrar?", "Redacta un follow-up para reactivarlo"];
+    return React.createElement("div", { style: { marginTop: 8, background: C.navyMid, border: `1px solid ${C.teal}44`, borderRadius: 10, display: "flex", flexDirection: "column", maxHeight: 360 } },
+        React.createElement("div", { style: { padding: "8px 12px", borderBottom: `1px solid ${C.navyLt}`, display: "flex", justifyContent: "space-between", alignItems: "center" } },
+            React.createElement("span", { style: { color: C.teal, fontWeight: 800, fontSize: 11 } },
+                "\uD83E\uDD16 ASISTENTE \u00B7 ",
+                deal.name),
+            React.createElement("button", { onClick: onClose, style: { background: "none", border: "none", color: C.muted, cursor: "pointer", fontSize: 14 } }, "\u2715")),
+        React.createElement("div", { style: { flex: 1, overflowY: "auto", padding: 10, display: "flex", flexDirection: "column", gap: 8, minHeight: 90 } },
+            msgs.map((m, i) => React.createElement("div", { key: i, style: { display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" } },
+                React.createElement("div", { style: { maxWidth: "90%", background: m.role === "user" ? C.teal + "22" : C.navyLt, border: `1px solid ${m.role === "user" ? C.teal + "44" : C.navyLt}`, borderRadius: 8, padding: "7px 10px" } }, m.role === "user" ? React.createElement("span", { style: { color: C.sandDim, fontSize: 12 } }, m.text) : React.createElement(React.Fragment, null,
+                    React.createElement(RichBlock, { text: m.text }),
+                    i > 0 && React.createElement("button", { onClick: () => slack(m.text), style: { marginTop: 6, background: "#4A154B22", color: "#E8A0C0", border: "1px solid #4A154B66", borderRadius: 5, padding: "2px 8px", fontSize: 9, fontWeight: 700, cursor: "pointer" } }, "\uD83D\uDCAC Slack"))))),
+            loading && React.createElement("span", { style: { color: C.muted, fontSize: 11 } }, "\u26A1 Analizando\u2026"),
+            React.createElement("div", { ref: endRef })),
+        React.createElement("div", { style: { padding: "4px 10px", display: "flex", gap: 4, flexWrap: "wrap" } }, sugg.map(s => React.createElement("button", { key: s, onClick: () => send(s), style: { background: C.navyLt, color: C.muted, border: "none", borderRadius: 4, padding: "2px 7px", fontSize: 9, cursor: "pointer" } }, s))),
+        React.createElement("div", { style: { padding: "8px 10px", borderTop: `1px solid ${C.navyLt}`, display: "flex", gap: 6 } },
+            React.createElement("input", { value: inp, onChange: e => setInp(e.target.value), onKeyDown: e => e.key === "Enter" && send(), placeholder: "Pregunta sobre el deal\u2026", style: { flex: 1, background: C.navy, border: `1px solid ${C.navyLt}`, borderRadius: 6, padding: "6px 10px", color: C.white, fontSize: 12 } }),
+            React.createElement("button", { onClick: () => send(), disabled: loading, style: { background: loading ? C.navyLt : C.teal, color: loading ? C.muted : C.navy, border: "none", borderRadius: 6, padding: "6px 13px", fontWeight: 700, fontSize: 12, cursor: "pointer" } }, "\u2192")));
+}
+// ════════════════════════════════════════════════════════════════════════════
+// SECCIÓN 3 — PIPELINE
+// ════════════════════════════════════════════════════════════════════════════
+function PipelineSection() {
+    const totalPipe = sum(FIN.funnel.map(f => f.amount));
+    const stale = FIN.deals.filter(d => d.stale);
+    const sureWins = FIN.deals.filter(d => d.sureWin);
+    const [chatDeal, setChatDeal] = useState(null);
+    return React.createElement("div", null,
+        React.createElement(SectionTitle, { icon: "\uD83D\uDD00", sub: `Pipeline total ${money(totalPipe)} · ${sureWins.length} wins asegurados · ${stale.length} deals sin actividad` }, "PIPELINE & FUNNEL \u2014 INSIGHTS"),
+        React.createElement(Card, { style: { marginBottom: 16 } },
+            React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 8 } },
+                React.createElement(SectionTitle, { icon: "\u2705" }, "CALIDAD DE DATOS \u2014 % CUMPLIMIENTO CRM"),
+                React.createElement("div", { style: { textAlign: "right" } },
+                    React.createElement("div", { style: { color: attainColor(FIN.pipeOverall), fontWeight: 800, fontSize: 24 } },
+                        FIN.pipeOverall,
+                        "%"),
+                    React.createElement("div", { style: { color: C.muted, fontSize: 10 } }, "cumplimiento global"))),
+            React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: 10 } }, FIN.pipeByKAM.map(k => React.createElement("div", { key: k.name },
+                React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 3 } },
+                    React.createElement("span", { style: { color: C.sand, fontSize: 11 } },
+                        k.name,
+                        " ",
+                        React.createElement("span", { style: { color: C.muted } },
+                            "(",
+                            k.deals,
+                            ")")),
+                    React.createElement("span", { style: { color: attainColor(k.fill), fontSize: 11, fontWeight: 700 } },
+                        k.fill,
+                        "%")),
+                React.createElement("div", { style: { height: 6, background: C.navyLt, borderRadius: 3, overflow: "hidden" } },
+                    React.createElement("div", { style: { width: `${k.fill}%`, height: "100%", background: attainColor(k.fill), borderRadius: 3 } })))))),
+        React.createElement(Card, { style: { marginBottom: 16 } },
+            React.createElement(SectionTitle, { icon: "\u23F1\uFE0F", sub: "D\u00EDas promedio en etapa vs benchmark de deals cerrados \u2014 rojo = vamos lentos" }, "VELOCIDAD DEL FUNNEL"),
+            React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10 } }, FIN.funnel.map(f => { const slow = f.avgDays > f.bench, ratio = f.avgDays / f.bench; return React.createElement("div", { key: f.stage, style: { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" } },
+                React.createElement("div", { style: { width: 100, color: C.white, fontWeight: 700, fontSize: 12 } }, f.stage),
+                React.createElement("div", { style: { flex: 1, minWidth: 160 } },
+                    React.createElement("div", { style: { height: 22, background: C.navyLt, borderRadius: 4, position: "relative", overflow: "hidden" } },
+                        React.createElement("div", { style: { width: `${Math.min(100, ratio * 55)}%`, height: "100%", background: slow ? C.red : C.green, borderRadius: 4, display: "flex", alignItems: "center", paddingLeft: 8 } },
+                            React.createElement("span", { style: { color: C.white, fontSize: 10, fontWeight: 700 } },
+                                f.avgDays,
+                                "d")),
+                        React.createElement("div", { style: { position: "absolute", left: `${Math.min(100, (f.bench / f.avgDays) * Math.min(100, ratio * 55))}%`, top: 0, height: "100%", borderLeft: `2px dashed ${C.sand}` } }))),
+                React.createElement("div", { style: { width: 78, textAlign: "right", color: C.muted, fontSize: 10 } },
+                    "bench ",
+                    f.bench,
+                    "d"),
+                React.createElement("div", { style: { width: 90, textAlign: "right" } }, slow ? React.createElement(Badge, { color: C.red, small: true },
+                    "+",
+                    ((ratio - 1) * 100).toFixed(0),
+                    "% lento") : React.createElement(Badge, { color: C.green, small: true }, "en ritmo")),
+                React.createElement("div", { style: { width: 80, textAlign: "right", color: C.teal, fontSize: 11, fontWeight: 700 } }, money(f.amount))); }))),
+        React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))", gap: 16 } },
+            React.createElement(Card, null,
+                React.createElement(SectionTitle, { icon: "\uD83C\uDFC6", sub: "Deals que empatan el perfil ganador" }, "WINS ASEGURADOS \u2014 AUTO-DETECTADOS"),
+                React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } },
+                    sureWins.map(d => React.createElement("div", { key: d.name, style: { display: "flex", justifyContent: "space-between", alignItems: "center", background: C.green + "11", border: `1px solid ${C.green}33`, borderRadius: 8, padding: "8px 10px" } },
+                        React.createElement("div", null,
+                            React.createElement("div", { style: { color: C.white, fontWeight: 700, fontSize: 12 } }, d.name),
+                            React.createElement("div", { style: { color: C.muted, fontSize: 10 } },
+                                d.stage,
+                                " \u00B7 ",
+                                d.emp,
+                                " emp \u00B7 ",
+                                d.mods,
+                                " m\u00F3dulos")),
+                        React.createElement("div", { style: { textAlign: "right" } },
+                            React.createElement("div", { style: { color: C.green, fontWeight: 800, fontSize: 14 } },
+                                d.winProb,
+                                "%"),
+                            React.createElement("div", { style: { color: C.teal, fontSize: 10 } }, money(d.mrr))))),
+                    !sureWins.length && React.createElement("div", { style: { color: C.muted, fontSize: 11 } }, "Sin wins asegurados."))),
+            React.createElement(Card, null,
+                React.createElement(SectionTitle, { icon: "\uD83D\uDEA8", sub: "Sin actividad \u2265 14 d\u00EDas \u00B7 preg\u00FAntale a la IA por qu\u00E9 est\u00E1 estancado" }, "DEALS ESTANCADOS"),
+                React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } },
+                    stale.map(d => (React.createElement("div", { key: d.name },
+                        React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", background: C.red + "11", border: `1px solid ${C.red}33`, borderRadius: 8, padding: "8px 10px" } },
+                            React.createElement("div", null,
+                                React.createElement("div", { style: { color: C.white, fontWeight: 700, fontSize: 12 } }, d.name),
+                                React.createElement("div", { style: { color: C.muted, fontSize: 10 } },
+                                    d.stage,
+                                    " \u00B7 ",
+                                    money(d.mrr),
+                                    " \u00B7 ",
+                                    d.lastTouch)),
+                            React.createElement("div", { style: { display: "flex", gap: 6, alignItems: "center" } },
+                                React.createElement(Badge, { color: C.red, small: true },
+                                    d.inactivity,
+                                    "d"),
+                                React.createElement("button", { onClick: () => setChatDeal(chatDeal === d.name ? null : d.name), style: { background: C.teal + "22", color: C.teal, border: `1px solid ${C.teal}44`, borderRadius: 5, padding: "3px 9px", fontSize: 10, fontWeight: 700, cursor: "pointer" } }, "\uD83E\uDD16 Preguntar IA"))),
+                        chatDeal === d.name && React.createElement(DealChat, { deal: d, onClose: () => setChatDeal(null) })))),
+                    !stale.length && React.createElement("div", { style: { color: C.muted, fontSize: 11 } }, "Todo el pipeline activo. \uD83C\uDF89")))));
+}
+// ════════════════════════════════════════════════════════════════════════════
+// SECCIÓN 4 — ONBOARDING
+// ════════════════════════════════════════════════════════════════════════════
+function OnboardingSection() {
+    const atRisk = FIN.onboardings.filter(o => o.earlyRisk);
+    return React.createElement("div", null,
+        React.createElement(SectionTitle, { icon: "\uD83D\uDE80", sub: "Objetivo: anticipar retrasos DESDE etapas tempranas" }, "FUNNEL DE ONBOARDING \u2014 EARLY WARNING"),
+        React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 10, marginBottom: 14 } },
+            React.createElement(Card, null,
+                React.createElement("div", { style: { color: C.muted, fontSize: 10 } }, "Onboardings activos"),
+                React.createElement("div", { style: { color: C.teal, fontWeight: 800, fontSize: 20 } }, FIN.onboardings.length)),
+            React.createElement(Card, null,
+                React.createElement("div", { style: { color: C.muted, fontSize: 10 } }, "Benchmark go-live"),
+                React.createElement("div", { style: { color: C.white, fontWeight: 800, fontSize: 20 } },
+                    sum(FIN.obExpected),
+                    "d")),
+            React.createElement(Card, null,
+                React.createElement("div", { style: { color: C.muted, fontSize: 10 } }, "En riesgo de retraso"),
+                React.createElement("div", { style: { color: C.red, fontWeight: 800, fontSize: 20 } }, atRisk.length)),
+            React.createElement(Card, null,
+                React.createElement("div", { style: { color: C.muted, fontSize: 10 } }, "Detectados a tiempo"),
+                React.createElement("div", { style: { color: C.green, fontWeight: 800, fontSize: 20 } },
+                    atRisk.length,
+                    "/",
+                    atRisk.length))),
+        React.createElement(Card, null,
+            React.createElement("div", { style: { display: "flex", fontSize: 9, color: C.muted, marginBottom: 8, paddingLeft: 4 } }, FIN.obStages.map((s, i) => React.createElement("div", { key: s, style: { flex: 1 } },
+                i + 1,
+                ". ",
+                s))),
+            React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10 } }, FIN.onboardings.map(o => React.createElement("div", { key: o.name, style: { background: o.earlyRisk ? C.red + "11" : C.navy + "55", border: `1px solid ${o.earlyRisk ? C.red + "44" : C.navyLt}`, borderRadius: 10, padding: "10px 12px" } },
+                React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 6 } },
+                    React.createElement("div", null,
+                        React.createElement("span", { style: { color: C.white, fontWeight: 700, fontSize: 12 } }, o.name),
+                        " ",
+                        React.createElement("span", { style: { color: C.muted, fontSize: 10 } },
+                            "\u00B7 KAM ",
+                            o.kam)),
+                    o.earlyRisk ? React.createElement(Badge, { color: C.red, small: true },
+                        "\u26A0 Proyecci\u00F3n: +",
+                        o.delayDays,
+                        "d sobre benchmark") : React.createElement(Badge, { color: C.green, small: true },
+                        "En ritmo (",
+                        o.projectedTotal,
+                        "d proy.)")),
+                React.createElement("div", { style: { display: "flex", gap: 3 } }, FIN.obStages.map((s, i) => React.createElement("div", { key: s, style: { flex: 1, height: 8, borderRadius: 3, background: i < o.stageIdx ? C.green : i === o.stageIdx ? (o.earlyRisk ? C.red : C.teal) : C.navyLt } }))),
+                React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginTop: 6 } },
+                    React.createElement("span", { style: { color: C.muted, fontSize: 10 } },
+                        "Etapa: ",
+                        React.createElement("span", { style: { color: C.sand } }, o.stage),
+                        " \u00B7 ",
+                        o.elapsed,
+                        "d"),
+                    React.createElement("span", { style: { color: o.paceFactor > 1.15 ? C.red : o.paceFactor < 0.9 ? C.green : C.amber, fontSize: 10, fontWeight: 700 } },
+                        "ritmo ",
+                        o.paceFactor > 1.15 ? "lento" : o.paceFactor < 0.9 ? "rápido" : "normal",
+                        " (",
+                        o.paceFactor,
+                        "\u00D7)"))))),
+            React.createElement("div", { style: { marginTop: 12, color: C.muted, fontSize: 10, lineHeight: 1.5 } },
+                "El \"ritmo\" se calcula desde la etapa 1: si va 1.15\u00D7 m\u00E1s lento que el benchmark acumulado, se proyecta el retraso ",
+                React.createElement("b", { style: { color: C.sand } }, "antes"),
+                " de que ocurra.")));
+}
+// ════════════════════════════════════════════════════════════════════════════
+// SECCIÓN 5 — UNIT ECONOMICS & NRR
+// ════════════════════════════════════════════════════════════════════════════
+function NrrGrid({ data, title, note }) { return React.createElement("div", null,
+    React.createElement("div", { style: { color: C.sandDim, fontSize: 11, fontWeight: 700, marginBottom: 6 } }, title),
+    React.createElement("div", { style: { overflowX: "auto" } },
+        React.createElement("table", { style: { borderCollapse: "separate", borderSpacing: 3, fontSize: 10 } },
+            React.createElement("thead", null,
+                React.createElement("tr", null,
+                    React.createElement("th", { style: { textAlign: "left", color: C.muted, fontWeight: 700, padding: "2px 6px" } }, "Cohorte"),
+                    ["M0", "M1", "M2", "M3", "M4", "M5", "M6"].map(m => React.createElement("th", { key: m, style: { color: C.muted, fontWeight: 700, padding: "2px 4px", minWidth: 38 } }, m)))),
+            React.createElement("tbody", null, data.map((row, i) => React.createElement("tr", { key: i },
+                React.createElement("td", { style: { color: C.sandDim, fontSize: 10, padding: "2px 6px", whiteSpace: "nowrap" } },
+                    MONTHS[i],
+                    " 2026"),
+                row.map((v, j) => React.createElement("td", { key: j, style: { background: heatColor(v), color: heatText(v), fontWeight: 700, textAlign: "center", padding: "6px 4px", borderRadius: 4, fontSize: 10 } },
+                    v,
+                    "%"))))))),
+    note && React.createElement("div", { style: { color: C.muted, fontSize: 9, marginTop: 4 } }, note)); }
+function ChurnCallout({ title, value, from, fromLabel, deltaLabel, accent, series }) {
+    const d = ((value - from) / from * 100);
+    const up = d >= 0;
+    return React.createElement(Card, null,
+        React.createElement("div", { style: { color: C.muted, fontSize: 11, fontWeight: 700, marginBottom: 6 } }, title),
+        React.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" } },
+            React.createElement("span", { style: { color: accent, fontWeight: 800, fontSize: 30 } },
+                value,
+                "%"),
+            React.createElement("span", { style: { color: C.muted, fontSize: 11 } },
+                fromLabel,
+                ": ",
+                from,
+                "%"),
+            React.createElement("span", { style: { color: up ? C.red : C.green, fontSize: 11, fontWeight: 800 } },
+                up ? "↑" : "↓",
+                " ",
+                Math.abs(d).toFixed(1),
+                "% ",
+                deltaLabel)),
+        React.createElement("div", { style: { marginTop: 8 } },
+            React.createElement(Line, { vals: series, color: accent, h: 50 })),
+        React.createElement("div", { style: { display: "flex", justifyContent: "space-between", marginTop: 2 } },
+            React.createElement("span", { style: { color: C.muted, fontSize: 9 } }, "Ene 2026"),
+            React.createElement("span", { style: { color: C.muted, fontSize: 9 } }, "Jun 2026")));
+}
+// modificadores deterministas por segmento para el filtro de Unit Economics
+const FILTER_MODS = {
+    ind: { "Todas las industrias": {}, "Manufactura": { churn: 0.85, addNrr: 4, arpa: 1.05 }, "Servicios": { churn: 1.05, addNrr: -1 }, "Retail": { churn: 1.3, addNrr: -4, arpa: 0.95 }, "Tecnología": { churn: 0.8, addNrr: 6, arpa: 1.1, qr: 1.15 }, "Salud": { churn: 0.9, payback: 1.05, addNrr: 2 }, "Construcción": { churn: 1.15, addNrr: -2 }, "Logística": { churn: 1.0, addNrr: 1 } },
+    size: { "Todos los tamaños": {}, "SMB (0–200)": { churn: 1.6, addNrr: -17, addGrr: -6, payback: 1.25, arpa: 0.45, qr: 0.7 }, "Mid-market (200–500)": { churn: 0.85, addNrr: 5, arpa: 1.5, qr: 1.1 }, "Enterprise (500+)": { churn: 0.5, addNrr: 20, addGrr: 6, payback: 0.85, arpa: 3.2, qr: 1.5 } },
+    prod: { "Todos los productos": {}, "Worky": { churn: 0.95, addNrr: 2 }, "Nómina + Worky": { churn: 0.8, addNrr: 6, arpa: 1.15 }, "Solo Nómina": { churn: 1.35, addNrr: -6, arpa: 0.85 } },
+};
+function applyMods(mods) {
+    const m = mods.reduce((a, x) => { var _a, _b, _c, _d, _e, _f; return ({ churn: a.churn * ((_a = x.churn) !== null && _a !== void 0 ? _a : 1), arpa: a.arpa * ((_b = x.arpa) !== null && _b !== void 0 ? _b : 1), payback: a.payback * ((_c = x.payback) !== null && _c !== void 0 ? _c : 1), qr: a.qr * ((_d = x.qr) !== null && _d !== void 0 ? _d : 1), addNrr: a.addNrr + ((_e = x.addNrr) !== null && _e !== void 0 ? _e : 0), addGrr: a.addGrr + ((_f = x.addGrr) !== null && _f !== void 0 ? _f : 0) }); }, { churn: 1, arpa: 1, payback: 1, qr: 1, addNrr: 0, addGrr: 0 });
+    const cc = v => Math.max(0.2, Math.min(20, +(v).toFixed(1)));
+    return {
+        arpa: Math.round(FIN.arpa * m.arpa), arpaPrev: Math.round(FIN.arpaPrevQ * m.arpa),
+        payback: +(FIN.cacPaybackMonthly[5] * m.payback).toFixed(1), paybackPrev: +(FIN.cacPaybackMonthly[2] * m.payback).toFixed(1),
+        qr: +(FIN.quickRatio * m.qr).toFixed(2), qrPrev: +(FIN.quickRatioPrevQ * m.qr).toFixed(2),
+        netChurn: +(FIN.netRevChurn[5] * m.churn).toFixed(1), netChurnPrev: +(FIN.netRevChurn[2] * m.churn).toFixed(1),
+        gross: cc(FIN.grossRevChurn[5] * m.churn), grossSeries: FIN.grossRevChurn.map(v => cc(v * m.churn)),
+        custNow: cc(FIN.custChurn[5] * m.churn), custFrom: cc(FIN.custChurn[0] * m.churn), custSeries: FIN.custChurn.map(v => cc(v * m.churn)),
+        nrr: Math.round(FIN.nrrSeries[5] + m.addNrr), grr: Math.min(100, Math.round(FIN.grrSeries[5] + m.addGrr)),
+        nrrSeries: FIN.nrrSeries.map(v => v + m.addNrr), grrSeries: FIN.grrSeries.map(v => Math.min(100, v + m.addGrr)),
+        cacSeries: FIN.cacMonthly.map(v => Math.round(v * m.payback)),
+        mult: m,
+    };
+}
+function UnitEconSection() {
+    const [nrrView, setNrrView] = useState("rev");
+    const smb = nrrView === "rev" ? FIN.smbRev : FIN.smbLogo, mm = nrrView === "rev" ? FIN.mmRev : FIN.mmLogo;
+    const [fInd, setFInd] = useState("Todas las industrias");
+    const [fSize, setFSize] = useState("Todos los tamaños");
+    const [fProd, setFProd] = useState("Todos los productos");
+    const M = applyMods([FILTER_MODS.ind[fInd], FILTER_MODS.size[fSize], FILTER_MODS.prod[fProd]]);
+    const cacNow = M.cacSeries[5], cacPrev = M.cacSeries[4], cacQ = M.cacSeries[2];
+    const parts = [];
+    if (fInd !== "Todas las industrias")
+        parts.push(fInd);
+    if (fSize !== "Todos los tamaños")
+        parts.push(fSize);
+    if (fProd !== "Todos los productos")
+        parts.push(fProd);
+    const filtered = parts.length > 0;
+    const segLabel = filtered ? parts.join(" · ") : "Todos los clientes";
+    const bandFilter = fSize === "SMB (0–200)" ? "0–200" : fSize === "Mid-market (200–500)" ? "200–500" : fSize === "Enterprise (500+)" ? "500+" : null;
+    const bandsShown = bandFilter ? FIN.bands.filter(b => b.band === bandFilter) : FIN.bands;
+    const ccp = v => Math.max(0.2, Math.min(40, +(v).toFixed(1)));
+    const bandsAdj = bandsShown.map(b => (Object.assign(Object.assign({}, b), { churn: ccp(b.churn * M.mult.churn), nrr: Math.round(b.nrr + M.mult.addNrr), payback: Math.max(1, Math.round(b.payback * M.mult.payback)), ltvCac: +Math.max(0.3, b.ltvCac / M.mult.churn).toFixed(1), ltv: Math.round(b.ltv / M.mult.churn * M.mult.arpa) })));
+    const cohortShift = (FILTER_MODS.ind[fInd].addNrr || 0) + (FILTER_MODS.prod[fProd].addNrr || 0);
+    const csh = nrrView === "rev" ? cohortShift : Math.round(cohortShift / 3);
+    const smbA = smb.map(r => r.map(v => Math.max(60, Math.min(150, v + csh)))), mmA = mm.map(r => r.map(v => Math.max(60, Math.min(165, v + csh))));
+    const selSt = { background: C.navy, color: C.white, border: `1px solid ${C.navyLt}`, borderRadius: 7, padding: "6px 10px", fontSize: 11, fontWeight: 600, cursor: "pointer" };
+    return React.createElement("div", null,
+        React.createElement(SectionTitle, { icon: "\uD83D\uDCD0", sub: "Eficiencia de adquisici\u00F3n, churn y retenci\u00F3n \u00B7 comparado vs Q anterior \u00B7 filtrable por segmento" }, "UNIT ECONOMICS & RETENCI\u00D3N"),
+        React.createElement("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 14, background: C.navyMid, border: `1px solid ${C.navyLt}`, borderRadius: 10, padding: "10px 12px" } },
+            React.createElement("span", { style: { color: C.teal, fontSize: 11, fontWeight: 800 } }, "\uD83D\uDD0E Filtrar:"),
+            React.createElement("select", { value: fInd, onChange: e => setFInd(e.target.value), style: selSt }, Object.keys(FILTER_MODS.ind).map(k => React.createElement("option", { key: k, value: k }, k))),
+            React.createElement("select", { value: fSize, onChange: e => setFSize(e.target.value), style: selSt }, Object.keys(FILTER_MODS.size).map(k => React.createElement("option", { key: k, value: k }, k))),
+            React.createElement("select", { value: fProd, onChange: e => setFProd(e.target.value), style: selSt }, Object.keys(FILTER_MODS.prod).map(k => React.createElement("option", { key: k, value: k }, k))),
+            filtered && React.createElement("button", { onClick: () => { setFInd("Todas las industrias"); setFSize("Todos los tamaños"); setFProd("Todos los productos"); }, style: tabBtn(false, C.teal) }, "\u21BA Ver todos"),
+            React.createElement("span", { style: { marginLeft: "auto", color: filtered ? C.teal : C.muted, fontSize: 11, fontWeight: 700 } }, filtered ? `Segmento: ${segLabel}` : "Vista: todos los clientes")),
+        React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 10, marginBottom: 16 } },
+            React.createElement(KpiCompare, { label: "ARPA", value: M.arpa, prev: M.arpaPrev, fmt: money, benchmark: "ingreso prom./cuenta" }),
+            React.createElement(KpiCompare, { label: "CAC Payback", value: M.payback, prev: M.paybackPrev, unit: " m", goodWhenLower: true, benchmark: "meta \u2264 12m", color: M.payback <= 12 ? C.green : C.amber }),
+            React.createElement(KpiCompare, { label: "Quick Ratio", value: M.qr, prev: M.qrPrev, unit: "\u00D7", benchmark: "bench >4", color: M.qr >= 4 ? C.green : C.amber }),
+            React.createElement(KpiCompare, { label: "Net MRR Churn", value: M.netChurn, prev: M.netChurnPrev, unit: "%", goodWhenLower: true, benchmark: "<0 = expansi\u00F3n neta", color: M.netChurn <= 0 ? C.green : C.amber })),
+        React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 14, marginBottom: 16 } },
+            React.createElement(Card, null,
+                React.createElement("div", { style: { color: C.sandDim, fontSize: 11, fontWeight: 700, marginBottom: 6 } }, "CAC \u2014 Ene a Jun 2026"),
+                React.createElement("div", { style: { display: "flex", alignItems: "baseline", gap: 10, marginBottom: 6 } },
+                    React.createElement("span", { style: { color: C.green, fontWeight: 800, fontSize: 24 } }, money(cacNow)),
+                    React.createElement("span", { style: { color: C.green, fontSize: 11, fontWeight: 700 } },
+                        "\u25BC ",
+                        pct(cacPrev - cacNow, cacPrev).toFixed(1),
+                        "% MoM"),
+                    React.createElement("span", { style: { color: C.green, fontSize: 11 } },
+                        "\u25BC ",
+                        pct(cacQ - cacNow, cacQ).toFixed(1),
+                        "% QoQ")),
+                React.createElement(Line, { vals: M.cacSeries, color: C.green, h: 50 }),
+                React.createElement("div", { style: { color: C.muted, fontSize: 9, marginTop: 4 } },
+                    "CAC anual \u25BC ",
+                    pct(FIN.cacAnnualPrev - Math.round(FIN.cacAnnualNow * M.mult.payback), FIN.cacAnnualPrev).toFixed(0),
+                    "% vs 2025")),
+            React.createElement(ChurnCallout, { title: "Customer Churn (% clientes que cancelan / mes)", value: M.custNow, from: M.custFrom, fromLabel: "Ene 2026", deltaLabel: "Ene\u2192Jun", accent: C.red, series: M.custSeries })),
+        React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))", gap: 14, marginBottom: 16 } },
+            React.createElement(Card, null,
+                React.createElement(SectionTitle, { icon: "\uD83E\uDE78", sub: "Gross = (churn + downgrade) / MRR inicial \u00B7 Net = gross \u2212 expansi\u00F3n" }, "REVENUE CHURN"),
+                React.createElement("div", { style: { display: "flex", gap: 20, marginBottom: 8, flexWrap: "wrap" } },
+                    React.createElement("div", null,
+                        React.createElement("div", { style: { color: C.muted, fontSize: 10 } }, "Gross MRR Churn"),
+                        React.createElement("div", { style: { color: C.amber, fontWeight: 800, fontSize: 20 } },
+                            M.gross,
+                            "%")),
+                    React.createElement("div", null,
+                        React.createElement("div", { style: { color: C.muted, fontSize: 10 } }, "Net MRR Churn"),
+                        React.createElement("div", { style: { color: M.netChurn <= 0 ? C.green : C.amber, fontWeight: 800, fontSize: 20 } },
+                            M.netChurn > 0 ? "+" : "",
+                            M.netChurn,
+                            "%"))),
+                React.createElement(Line, { vals: M.grossSeries, color: C.amber, h: 46 }),
+                React.createElement("div", { style: { color: C.muted, fontSize: 9, marginTop: 4 } }, "Benchmark SaaS: churn anual sano 5\u20137% (ChartMogul).")),
+            React.createElement(Card, null,
+                React.createElement(SectionTitle, { icon: "\uD83D\uDCC8", sub: "NRR (con expansi\u00F3n) vs GRR (sin expansi\u00F3n) \u00B7 la brecha es tu upsell" }, "NRR vs GRR (blended)"),
+                React.createElement("div", { style: { display: "flex", gap: 20, marginBottom: 8, flexWrap: "wrap" } },
+                    React.createElement("div", null,
+                        React.createElement("div", { style: { color: C.muted, fontSize: 10 } }, "NRR"),
+                        React.createElement("div", { style: { color: M.nrr >= 100 ? C.green : C.amber, fontWeight: 800, fontSize: 20 } },
+                            M.nrr,
+                            "%")),
+                    React.createElement("div", null,
+                        React.createElement("div", { style: { color: C.muted, fontSize: 10 } }, "GRR"),
+                        React.createElement("div", { style: { color: C.teal, fontWeight: 800, fontSize: 20 } },
+                            M.grr,
+                            "%"))),
+                React.createElement("svg", { width: "100%", height: 56, viewBox: "0 0 240 56", preserveAspectRatio: "none" }, (() => { const all = [...M.nrrSeries, ...M.grrSeries]; const mx = Math.max(...all), mn = Math.min(...all) - 2, rg = mx - mn || 1, step = 240 / 5; const ln = a => a.map((v, i) => `${i * step},${50 - ((v - mn) / rg) * 44}`).join(" "); return React.createElement(React.Fragment, null,
+                    React.createElement("polyline", { points: ln(M.nrrSeries), fill: "none", stroke: C.green, strokeWidth: "2.5" }),
+                    React.createElement("polyline", { points: ln(M.grrSeries), fill: "none", stroke: C.teal, strokeWidth: "2.5" })); })()),
+                React.createElement("div", { style: { color: C.muted, fontSize: 9, marginTop: 4 } }, "Mediana SaaS NRR ~102% (SaaS Capital). Blended esconde el SMB \u2192 ver cohortes."))),
+        React.createElement(Card, { style: { marginBottom: 16 } },
+            React.createElement(SectionTitle, { icon: "\uD83C\uDFE2", sub: "LTV (valor de vida total), payback, LTV:CAC, NRR y churn por rango de empleados" }, "RETENCI\u00D3N POR TAMA\u00D1O DE EMPRESA"),
+            React.createElement("div", { style: { overflowX: "auto" } },
+                React.createElement("table", { style: { width: "100%", borderCollapse: "collapse", fontSize: 11, minWidth: 620 } },
+                    React.createElement("thead", null,
+                        React.createElement("tr", { style: { background: C.navy } }, ["Rango empleados", "Clientes", "LTV", "CAC Payback", "LTV:CAC", "NRR", "Churn"].map(h => React.createElement("th", { key: h, style: { textAlign: h === "Rango empleados" ? "left" : "right", color: C.muted, fontWeight: 700, padding: "9px 12px", fontSize: 10 } }, h)))),
+                    React.createElement("tbody", null, bandsAdj.map(b => React.createElement("tr", { key: b.band, style: { borderTop: `1px solid ${C.navyLt}` } },
+                        React.createElement("td", { style: { padding: "10px 12px", color: C.white, fontWeight: 700 } },
+                            React.createElement("span", { style: { color: b.color } }, "\u25CF"),
+                            " ",
+                            b.band),
+                        React.createElement("td", { style: { padding: "10px 12px", color: C.sandDim, textAlign: "right" } }, b.clients),
+                        React.createElement("td", { style: { padding: "10px 12px", color: C.teal, fontWeight: 700, textAlign: "right" } }, money(b.ltv)),
+                        React.createElement("td", { style: { padding: "10px 12px", textAlign: "right", color: b.payback <= 12 ? C.green : C.amber, fontWeight: 700 } },
+                            b.payback,
+                            " m"),
+                        React.createElement("td", { style: { padding: "10px 12px", textAlign: "right", color: b.ltvCac >= 3 ? C.green : C.amber, fontWeight: 700 } },
+                            b.ltvCac,
+                            "\u00D7"),
+                        React.createElement("td", { style: { padding: "10px 12px", textAlign: "right" } },
+                            React.createElement("span", { style: { color: b.nrr >= 100 ? C.green : C.amber, fontWeight: 800 } },
+                                b.nrr,
+                                "%")),
+                        React.createElement("td", { style: { padding: "10px 12px", textAlign: "right" } },
+                            React.createElement("span", { style: { color: b.churn <= 8 ? C.green : C.red, fontWeight: 700 } },
+                                b.churn,
+                                "%"))))))),
+            React.createElement("div", { style: { marginTop: 10, background: C.amber + "11", border: `1px solid ${C.amber}33`, borderRadius: 8, padding: "9px 12px", color: C.sand, fontSize: 11, lineHeight: 1.5 } },
+                "\uD83D\uDCA1 ",
+                React.createElement("b", null, "Insight RevOps:"),
+                " el segmento 0\u2013200 tiene LTV:CAC 2.4\u00D7 (debajo del 3\u00D7 sano), payback 11m y NRR 88% \u2014 la cubeta con hoyos. La palanca de rentabilidad es ",
+                React.createElement("b", { style: { color: C.amber } }, "frenar el churn del SMB"),
+                ", no venderle m\u00E1s abajo.")),
+        React.createElement(Card, null,
+            React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 } },
+                React.createElement(SectionTitle, { icon: "\uD83D\uDD25", sub: "Cohortes segmentadas evitan promedios dominados por whales" }, "NRR POR COHORTE \u2014 SMB vs MID-MARKET"),
+                React.createElement("div", { style: { display: "flex", gap: 6 } },
+                    React.createElement("button", { onClick: () => setNrrView("rev"), style: tabBtn(nrrView === "rev", C.teal) }, "Por revenue (NRR)"),
+                    React.createElement("button", { onClick: () => setNrrView("logo"), style: tabBtn(nrrView === "logo", C.teal) }, "Por # clientes (logos)"))),
+            React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(320px,1fr))", gap: 20 } },
+                React.createElement(NrrGrid, { data: smbA, title: "\uD83D\uDD3B Segmento SMB (0\u2013200 empleados)", note: nrrView === "rev" ? "Cae bajo 100%: el revenue se contrae mes a mes sin nuevas ventas." : "Retención de logos: pérdida progresiva de cuentas." }),
+                React.createElement(NrrGrid, { data: mmA, title: "\uD83D\uDD3A Segmento Mid-market (200+ empleados)", note: nrrView === "rev" ? "NRR >100%: expansión neta, crece sin adquirir clientes nuevos." : "Logos estables: casi cero pérdida de cuentas." })),
+            React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginTop: 14, flexWrap: "wrap" } },
+                React.createElement("span", { style: { color: C.muted, fontSize: 10 } }, "Escala NRR:"),
+                [70, 85, 100, 115, 130, 140].map(v => React.createElement("div", { key: v, style: { display: "flex", alignItems: "center", gap: 4 } },
+                    React.createElement("div", { style: { width: 18, height: 14, borderRadius: 3, background: heatColor(v) } }),
+                    React.createElement("span", { style: { color: C.muted, fontSize: 9 } },
+                        v,
+                        "%"))))));
+}
+// ════════════════════════════════════════════════════════════════════════════
+// MAIN
+// ════════════════════════════════════════════════════════════════════════════
+function WorkyFinanceBoard() {
+    const [sub, setSub] = useState("resumen");
+    const subs = [{ id: "resumen", icon: "💰", label: "Resumen Revenue" }, { id: "cuentas", icon: "🎯", label: "Top Cuentas" }, { id: "pipeline", icon: "🔀", label: "Pipeline & Funnel" }, { id: "onboarding", icon: "🚀", label: "Onboarding" }, { id: "unit", icon: "📐", label: "Unit Economics & NRR" }];
+    return React.createElement("div", { style: { background: C.navy, minHeight: "100vh", fontFamily: "'Inter','Segoe UI',sans-serif", color: C.white } },
+        React.createElement("div", { style: { background: C.navy, borderBottom: `1px solid ${C.navyLt}`, padding: "0 20px", position: "sticky", top: 0, zIndex: 100 } },
+            React.createElement("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0", flexWrap: "wrap", gap: 8 } },
+                React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
+                    React.createElement("div", { style: { background: C.tealDim, color: C.white, fontWeight: 800, fontSize: 15, padding: "5px 14px", borderRadius: 6, letterSpacing: "0.04em" } }, "Worky"),
+                    React.createElement("div", null,
+                        React.createElement("div", { style: { color: C.white, fontWeight: 800, fontSize: 14 } }, "Tablero Financiero \u00B7 RevOps"),
+                        React.createElement("div", { style: { color: C.muted, fontSize: 9, letterSpacing: "0.05em" } }, "CFO-GRADE \u00B7 YTD 2026 vs OBJETIVO \u00B7 POWERED BY CLAUDE AI"))),
+                React.createElement("div", { style: { background: C.teal + "22", color: C.teal, fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 20, border: `1px solid ${C.teal}44` } }, "\u25CF DATOS FICTICIOS")),
+            React.createElement("div", { style: { display: "flex", gap: 0, overflowX: "auto", paddingBottom: 1 } }, subs.map(t => React.createElement("button", { key: t.id, onClick: () => setSub(t.id), style: { background: "none", border: "none", borderBottom: sub === t.id ? `2px solid ${C.teal}` : "2px solid transparent", color: sub === t.id ? C.teal : C.muted, padding: "10px 15px", cursor: "pointer", fontWeight: sub === t.id ? 800 : 500, fontSize: 11, letterSpacing: "0.03em", whiteSpace: "nowrap" } },
+                t.icon,
+                " ",
+                t.label)))),
+        React.createElement("div", { style: { padding: "18px 20px", maxWidth: 1180, margin: "0 auto" } },
+            sub === "resumen" && React.createElement(ResumenSection, null),
+            sub === "cuentas" && React.createElement(TopCuentasSection, null),
+            sub === "pipeline" && React.createElement(PipelineSection, null),
+            sub === "onboarding" && React.createElement(OnboardingSection, null),
+            sub === "unit" && React.createElement(UnitEconSection, null)));
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(WorkyFinanceBoard));
+} catch (err) {
+  document.getElementById("root").innerHTML='<div style="color:#E8445A;font-family:sans-serif;padding:24px;font-size:13px;white-space:pre-wrap;line-height:1.5">⚠ Error al iniciar el tablero:\n\n'+(err && err.stack || err)+'</div>';
+}
+</script>
+</body>
+</html>
